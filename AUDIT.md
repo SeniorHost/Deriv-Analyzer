@@ -46,4 +46,19 @@ Se revisaron los ocho archivos originales: README, manifest, background, panel H
 4. Si Deriv ya no ofrece un tick anterior o igual al vencimiento dentro de 15 s, no se liquida esa señal. Los registros heredados mal formados se conservan para exportación, sin corregir su contenido por conjetura.
 5. El backtest utiliza cierres históricos como referencia idealizada, no un precio ejecutable. Wilson presupone condiciones estadísticas que no garantizan independencia entre señales/activos; el filtrado de activos y las consultas repetidas también pueden introducir sesgo de selección. No se estiman pagos, costes, contratos reales ni rentabilidad.
 
-No se publican cambios del entorno, no se hace push y no se fusiona ninguna rama durante esta auditoría.
+La auditoría inicial se realizó sin publicar cambios. Los pushes posteriores, autorizados expresamente, se limitan a `audit/v1.9-stability`, vinculada al PR #1. No se fusiona con `main`, no se publican releases ni se despliega la extensión.
+
+
+## Validación continua del PR #1 (2026-11-17)
+
+Se añade `.github/workflows/validation.yml` a la misma rama candidata, sin cambios en estrategias, indicadores, diseño ni pruebas existentes.
+
+- Eventos: cada `push` a `audit/v1.9-stability` y cada `pull_request` dirigido a `main`.
+- Un solo job con Node.js 20 en Ubuntu, permisos `contents: read`, sin credenciales Git persistentes, sin instalaciones de dependencias del proyecto ni consultas a Deriv.
+- Comprueba sintaxis con `node --check` para todos los archivos JS/CJS versionados y ejecuta `node --test tests/*.test.cjs`.
+- Ejecuta `git diff --check` sobre el árbol de trabajo y los cambios del evento (base/head de PR o before/head de push; contempla la creación de rama). El checkout conserva el historial para resolver esas referencias.
+- Cancela ejecuciones anteriores del mismo workflow/ref al recibir nuevos cambios; no crea versiones, releases ni despliegues.
+
+Validación local previa al push: Node.js **20.20.2**, **48 pruebas aprobadas, 0 fallidas, 0 canceladas, 0 omitidas**. Sintaxis de los 13 archivos JS/CJS versionados aprobada; `git diff --check` aprobado tanto para los cambios locales como para la candidata respecto a la base de `main`. No se encontraron fallos que requirieran modificar la aplicación.
+
+El resultado local no acredita una ejecución en GitHub Actions. La consulta de la API de GitHub devuelve `Forbidden` en este entorno; el estado remoto debe verificarse en [Validate candidate](https://github.com/SeniorHost/Deriv-Analyzer/actions/workflows/validation.yml). La validación como extensión instalada sigue pendiente según los límites anteriores.
