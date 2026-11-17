@@ -62,3 +62,20 @@ Se añade `.github/workflows/validation.yml` a la misma rama candidata, sin camb
 Validación local previa al push: Node.js **20.20.2**, **48 pruebas aprobadas, 0 fallidas, 0 canceladas, 0 omitidas**. Sintaxis de los 13 archivos JS/CJS versionados aprobada; `git diff --check` aprobado tanto para los cambios locales como para la candidata respecto a la base de `main`. No se encontraron fallos que requirieran modificar la aplicación.
 
 El resultado local no acredita una ejecución en GitHub Actions. La consulta de la API de GitHub devuelve `Forbidden` en este entorno; el estado remoto debe verificarse en [Validate candidate](https://github.com/SeniorHost/Deriv-Analyzer/actions/workflows/validation.yml). La validación como extensión instalada sigue pendiente según los límites anteriores.
+
+
+## Mi sala de trading — candidata feature/trading-room
+
+Base: `8634638` de `audit/v1.9-stability`. Se mantiene una sola rama de implementación. Cambios de interfaz y coordinación; no se cambian las fórmulas ni los umbrales de los indicadores, el backtest ni la liquidación prospectiva auditada.
+
+- Selección inicial de seis activos del catálogo, máximo doce, editable y persistida con la clave independiente `deriv_analyzer_room_v1`. Una selección intencionadamente vacía no se sustituye por los valores iniciales. Restauración inválida o fallo de escritura se notifican, sin anunciar un guardado inexistente.
+- Importación deduplicada de pestañas de `https://dtrader.deriv.com/` cuyo parámetro `symbol` sea válido. No se interpreta el contenido de cuentas ni títulos ambiguos. Activación y enfoque de una pestaña coincidente; creación de una nueva si no existe. No se reescriben otras pestañas.
+- Tarjetas principales solo para los seleccionados; hasta doce activos se escanean, con prioridad para la selección. Horizonte de cinco minutos, velas de un minuto y monitoreo automático tras conectar. El usuario puede pausarlo y se detiene al cerrar el panel.
+- Alertas por símbolo/vela, sin repetir el aviso por cambios de dirección de esa vela. La vigencia técnica termina 60 segundos después del cierre de origen y no se confunde con el vencimiento prospectivo de cinco minutos desde el tick de entrada. Se muestra ESPERAR cuando caducan o no hay reloj fiable. Se recuerdan los últimos 240 IDs de alerta localmente.
+- Alternativas limitadas a tres: señal vigente, puntuación ≥60 y ≥10 puntos sobre el mínimo vigente seleccionado (cero si ninguno), además de `back.enough`. Reemplazo únicamente mediante botón de aprobación y comprobación de vigencia al aprobar; no se realiza navegación automática por ranking.
+- Aviso visible del resultado observado de 151 señales (75 aciertos, 76 fallos), ausencia de ventaja financiera demostrada y puntuación técnica distinta de probabilidad. Sin compras ni credenciales.
+- Se conservan las 48 pruebas originales. Once nuevas pruebas cubren selección, persistencia, fallos de guardado, recomendaciones, vigencia, deduplicación, sugerencias caducadas, importación, activación y creación de pestañas.
+- Validación: **59 pruebas aprobadas, 0 fallidas y 0 omitidas**; prueba DOM real en Chromium con API simulada aprobada. La prueba de navegador comprueba seis tarjetas iniciales, análisis de doce activos, alta/reemplazo/baja, importación, registro prospectivo, CSV y restauración de siete activos después de editar y recargar. Sin errores de página.
+- Workflow ampliado para push a `feature/trading-room` y PR hacia `audit/v1.9-stability` o `main`; mantiene permisos de solo lectura y Node.js 20. El push solicita la ejecución automática. El estado remoto de Actions y la creación del PR dependen del acceso a GitHub, cuya API previamente devolvió `Forbidden`; no se equipara el pase local a una ejecución remota confirmada.
+
+Sigue pendiente la validación como extensión instalada en Chrome autorizado y una sesión prolongada con datos reales. Los mocks de pestañas prueban el contrato de navegación, no la experiencia de una cuenta real de Deriv. No hay fusiones, releases, despliegues ni operaciones financieras.

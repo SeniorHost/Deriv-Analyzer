@@ -8,7 +8,7 @@ function harness(options={}){
  const timers=new Map(),elements=new Map(),sockets=[],writes=[],downloads=[];
  let stored=options.records,failWrite=false;
  const element=()=>({textContent:'',disabled:false,value:'',checked:false,style:{},children:[],listeners:{},
- addEventListener(name,fn){this.listeners[name]=fn;},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},click(){this.listeners.click?.();if(this.download)downloads.push(this);}});
+ setAttribute(name,value){this[name]=value;},addEventListener(name,fn){this.listeners[name]=fn;},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},click(){this.listeners.click?.();if(this.download)downloads.push(this);}});
  const get=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);};
  get('horizon').value='5';get('market').value='synthetic';
  class FakeDate extends Date{constructor(...args){super(...(args.length?args:[wall+mono]));}static now(){return wall+mono;}}
@@ -25,7 +25,7 @@ function harness(options={}){
  WebSocket:Socket,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:test';}static revokeObjectURL(){}},
  document:{getElementById:get,createElement:element},window:{addEventListener(){}},
  chrome:{storage:{local:options.storage||{get:()=>options.get?options.get():Promise.resolve(structuredClone({deriv_analyzer_forward_v16:stored})),set:async data=>{if(failWrite)throw new Error('quota');stored=structuredClone(data.deriv_analyzer_forward_v16);writes.push(stored);}}},runtime:{sendMessage(_m,fn){fn?.({ok:true});}}}});
- for(const file of ['indicators.js','forward.js','panel.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file});
+ for(const file of ['indicators.js','forward.js','room.js','panel.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file});
  const run=code=>vm.runInContext(code,ctx);
  async function tick(ms){const target=mono+ms;for(;;){await flush();const entries=[...timers].filter(([,t])=>t.at<=target).sort((a,b)=>a[1].at-b[1].at);if(!entries.length)break;const [id,t]=entries[0];mono=t.at;timers.delete(id);t.fn();}mono=target;await flush();}
  async function ready(){await flush();run('connect()');const socket=sockets.at(-1);socket.open();await flush();const time=socket.sent.find(x=>x.time);socket.emit({req_id:time.req_id,time:Math.floor((wall+mono)/1000)});await flush();const catalog=socket.sent.find(x=>x.active_symbols);socket.emit({req_id:catalog.req_id,active_symbols:[{underlying_symbol:'1HZ10V',underlying_symbol_name:'Volatility 10 Index',market:'synthetic'}]});await flush();return socket;}
