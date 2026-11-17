@@ -2,9 +2,9 @@ name: Validate candidate
 
 on:
   push:
-    branches: [audit/v1.9-stability, feature/trading-room]
+    branches: [audit/v1.9-stability, feature/trading-room, feature/duration-comparator]
   pull_request:
-    branches: [main, audit/v1.9-stability]
+    branches: [main, audit/v1.9-stability, feature/trading-room]
 
 permissions:
   contents: read

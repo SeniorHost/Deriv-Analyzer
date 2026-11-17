@@ -279,21 +279,24 @@ function forgetSubscription(socket,id){
  if(!id||ws!==socket||socket.readyState!==WebSocket.OPEN)return;
  request({forget:id},5000).catch(e=>{if(ws===socket)log('No se pudo cancelar suscripción: '+e.message);});
 }
-function request(data,timeout=16000,accept=null){return new Promise((resolve,reject)=>{
+function request(data,timeout=16000,accept=null,abortSignal=null){return new Promise((resolve,reject)=>{
  const socket=ws;
+ if(abortSignal?.aborted)return reject(new Error('Solicitud cancelada'));
  if(!socket||socket.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
  const req_id=++requestId;
  const finish=(error,message)=>{
   const p=pending.get(req_id);if(!p)return;
-  pending.delete(req_id);clearTimeout(p.timer);
+  pending.delete(req_id);clearTimeout(p.timer);abortSignal?.removeEventListener('abort',onAbort);
   if(p.subscriptionId)forgetSubscription(socket,p.subscriptionId);
   if(error)reject(error);else resolve(message);
  };
+ const onAbort=()=>finish(new Error('Flujo cancelado o sin ticks recientes'));
  const timer=setTimeout(()=>finish(new Error('No llegó respuesta de API (timeout)')),timeout);
  pending.set(req_id,{socket,resolve,reject,timer,finish,accept,subscriptionId:null});
+ abortSignal?.addEventListener('abort',onAbort,{once:true});
  try{socket.send(JSON.stringify({...data,req_id}));}catch(e){finish(e);}
  });}
-function cleanPending(error){for(const p of [...pending.values()]){clearTimeout(p.timer);p.reject(error)}pending.clear();}
+function cleanPending(error){for(const p of [...pending.values()])p.finish(error);}
 function disconnect(socket,reason){
  if(ws!==socket)return;
  ws=null;apiReady=false;symbols=[];invalidateClock();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
@@ -470,8 +473,10 @@ async function scan(single=false){
      if(cancelScan)break;
      const technical=TA.calculate(candles),last=candles.length-1,signal=TA.signal(candles,technical,last),back=VALIDATION.run(candles,technical,h,item.symbol);
      allTrades.push(...back.records);
+     if(typeof CMP_UI!=='undefined'){try{CMP_UI.onHistory(item.symbol,candles,technical);}catch(e){log('Comparador no actualizado: '+e.message);}}
      const row={symbol:item.symbol,name:item.display_name||item.symbol,type:symbolType(item),direction:signal.dir,score:signal.score,reason:signal.why,lastTime:candles[last].epoch,close:candles[last].close,samples:candles.length,back,pages,quality:'Velas cerradas validables',mode};
      results.push(row);
+     if(typeof CMP_UI!=='undefined'){try{void CMP_UI.signal(row).catch(e=>log('Comparador: '+e.message));}catch(e){log('Comparador: '+e.message);}}
      try{await registerForwardItem(row,h,socket);}catch(e){log(`Seguimiento ${item.symbol} no registrado: ${e.message}`);}
      log(item.symbol+': '+candles.length+' velas válidas');
     }catch(e){

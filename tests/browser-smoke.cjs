@@ -9,7 +9,7 @@ const http=require('node:http');
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  const server=http.createServer(async(req,res)=>{
   const name=req.url.split('?')[0];
-  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
+  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');
   try{res.end(await fs.readFile(path.resolve(__dirname,'..'+name)));}catch{res.writeHead(500);res.end();}
  });
@@ -20,7 +20,7 @@ const http=require('node:http');
   page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
    const storage=JSON.parse(localStorage.getItem('mock-storage')||'{}');
-   globalThis.__roomMessages=[];globalThis.chrome={storage:{local:{get:async key=>({[key]:storage[key]}),set:async data=>{Object.assign(storage,data);localStorage.setItem('mock-storage',JSON.stringify(storage));}}},runtime:{sendMessage(m,cb){__roomMessages.push(m);cb?.(m.type==='INSPECT_DERIV_VIEWS'?{ok:true,symbols:['VOL_11'],internalChartsSupported:false,scope:'browser-urls-only'}:{ok:true,mode:'deriv-workspace',message:'Deriv activado sin cambiar sus gráficos. Selecciona el gráfico interno manualmente.'});}}};
+   globalThis.__storage=storage;globalThis.__roomMessages=[];globalThis.chrome={storage:{local:{get:async key=>({[key]:storage[key]}),set:async data=>{Object.assign(storage,data);localStorage.setItem('mock-storage',JSON.stringify(storage));}}},runtime:{sendMessage(m,cb){__roomMessages.push(m);cb?.(m.type==='INSPECT_DERIV_VIEWS'?{ok:true,symbols:['VOL_11'],internalChartsSupported:false,scope:'browser-urls-only'}:{ok:true,mode:'deriv-workspace',message:'Deriv activado sin cambiar sus gráficos. Selecciona el gráfico interno manualmente.'});}}};
   });
   let historyCalls=0;
   await page.routeWebSocket('wss://api.derivws.com/**',ws=>{
@@ -29,7 +29,7 @@ const http=require('node:http');
     if(m.time)respond({time:Math.floor(Date.now()/1000)});
     else if(m.active_symbols)respond({active_symbols:Array.from({length:12},(_,i)=>({underlying_symbol:i?'VOL_'+i:'1HZ10V',underlying_symbol_name:'Volatility '+i,market:'synthetic_index'}))});
     else if(m.ticks_history){historyCalls++;const end=m.end==='latest'?Math.floor(Date.now()/60000)*60:Math.floor(Number(m.end)/60)*60;const candles=Array.from({length:m.count},(_,i)=>{const close=100+Math.sin((end/60-m.count+1+i)/4)*2;return {epoch:end-(m.count-1-i)*60,open:close,high:close+.5,low:close-.5,close};});respond({candles});}
-    else if(m.ticks)setTimeout(()=>respond({subscription:{id:'tick'},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101}}),2100);
+    else if(m.ticks)setTimeout(()=>{respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101}});for(let i=1;i<=10;i++)setTimeout(()=>respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101+i/10}}),i*100);},2100);
     else if(m.forget)respond({forget:1});
     else if(m.ping)respond({ping:'pong'});
     else throw new Error('Unexpected API operation');
@@ -50,6 +50,12 @@ const http=require('node:http');
    const stored=await chrome.storage.local.get('deriv_analyzer_forward_v16');
    if(!stored.deriv_analyzer_forward_v16?.some(r=>r.horizon===1&&r.status==='PENDIENTE'))throw new Error('Prospective entry was not persisted');
   });
+  await page.locator('section[aria-label="Comparador de estrategias"] summary').click();
+  assert.equal(await page.locator('#cmpEnable').isChecked(),false);
+  assert.equal(await page.locator('#cmpResults > div').count(),2);
+  await page.selectOption('#cmpMode','ticks');await page.click('#cmpTicks');
+  await page.waitForFunction(()=>document.querySelector('#cmpStatus').textContent.includes('insuficientes'));
+  await page.selectOption('#cmpMode','time');
   await page.click('#editRoom');
   await page.locator('.selection-row select').first().selectOption('VOL_7');
   await page.locator('.selection-row button').first().click();
@@ -73,6 +79,14 @@ const http=require('node:http');
   if(process.env.ROOM_SCREENSHOT)await page.screenshot({path:process.env.ROOM_SCREENSHOT,fullPage:true});
   const downloadPromise=page.waitForEvent('download');await page.click('#exportForward');const download=await downloadPromise;
   const file=path.join(output,'forward.csv');await download.saveAs(file);assert.match(await fs.readFile(file,'utf8'),/^symbol,name,recordedAt/);
+  await page.check('#cmpEnable');
+  await page.waitForFunction(()=>Boolean(__storage.deriv_analyzer_comparator_v1?.enabled));
+  await page.evaluate(()=>{void CMP_UI.signal({symbol:ROOM_UI.selected[0],lastTime:Math.floor(closedThrough()/60)*60-60,direction:'SUBE'});});
+  await page.waitForFunction(()=>{const s=__storage.deriv_analyzer_comparator_v1;return s.groups.some(g=>g.evaluations.filter(r=>r.mode==='ticks').every(r=>r.status==='ACIERTO'));},{},{timeout:15000});
+  await page.evaluate(()=>ws.close());
+  await page.waitForFunction(()=>{const s=__storage.deriv_analyzer_comparator_v1;return s.groups.some(g=>g.evaluations.filter(r=>r.mode==='time').every(r=>r.status==='INCOMPLETA'));});
+  const cmpDownloadPromise=page.waitForEvent('download');await page.click('#cmpExport');const cmpDownload=await cmpDownloadPromise;
+  const cmpFile=path.join(output,'comparator.csv');await cmpDownload.saveAs(cmpFile);assert.match(await fs.readFile(cmpFile,'utf8'),/PROSPECTIVO_FLUJO/);
   // Reload checks selection and records using a persistent Chrome-storage mock.
   await page.reload();await page.waitForFunction(()=>document.querySelector('#forwardCount').textContent.includes('pendientes'));
   await page.waitForFunction(()=>document.querySelectorAll('.room-card').length===6);

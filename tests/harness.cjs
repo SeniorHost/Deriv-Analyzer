@@ -20,12 +20,12 @@ function harness(options={}){
   emit(m){this.onmessage?.({data:JSON.stringify(m)});}
   send(raw){if(this.throwSend)throw new Error('send failed');const m=JSON.parse(raw);this.sent.push(m);options.respond?.(this,m,ctx);}
  }
- const ctx=vm.createContext({console,navigator:{locks:options.locks||{request:async(_name,fn)=>fn()}},Date:FakeDate,performance:{now:()=>mono},structuredClone,
+ const ctx=vm.createContext({console,navigator:{locks:options.locks||{request:async(_name,...args)=>args.at(-1)({})}},Date:FakeDate,performance:{now:()=>mono},structuredClone,AbortController,
  setTimeout(fn,delay){const id=++nextTimer;timers.set(id,{fn,at:mono+delay});return id;},clearTimeout:id=>timers.delete(id),
  WebSocket:Socket,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:test';}static revokeObjectURL(){}},
  document:{getElementById:get,createElement:element},window:{addEventListener(){}},
  chrome:{storage:{local:options.storage||{get:()=>options.get?options.get():Promise.resolve(structuredClone({deriv_analyzer_forward_v16:stored})),set:async data=>{if(failWrite)throw new Error('quota');stored=structuredClone(data.deriv_analyzer_forward_v16);writes.push(stored);}}},runtime:{sendMessage(_m,fn){fn?.({ok:true});}}}});
- for(const file of ['indicators.js','forward.js','room.js','panel.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file});
+ for(const file of ['indicators.js','forward.js','room.js','comparator.js','panel.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx,{filename:file});
  const run=code=>vm.runInContext(code,ctx);
  async function tick(ms){const target=mono+ms;for(;;){await flush();const entries=[...timers].filter(([,t])=>t.at<=target).sort((a,b)=>a[1].at-b[1].at);if(!entries.length)break;const [id,t]=entries[0];mono=t.at;timers.delete(id);t.fn();}mono=target;await flush();}
  async function ready(){await flush();run('connect()');const socket=sockets.at(-1);socket.open();await flush();const time=socket.sent.find(x=>x.time);socket.emit({req_id:time.req_id,time:Math.floor((wall+mono)/1000)});await flush();const catalog=socket.sent.find(x=>x.active_symbols);socket.emit({req_id:catalog.req_id,active_symbols:[{underlying_symbol:'1HZ10V',underlying_symbol_name:'Volatility 10 Index',market:'synthetic'}]});await flush();return socket;}
