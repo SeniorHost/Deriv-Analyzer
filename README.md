@@ -4,8 +4,8 @@
 
 - Las dos señales prospectivas observadas en la v1.8 (`1HZ10V` y `1HZ30V`) demostraron que el registro ya funciona; fueron almacenadas en `chrome.storage.local`. Esta versión usa la misma clave `deriv_analyzer_forward_v16`, por lo que se mantienen mientras se cargue como **actualización de la misma extensión** (no si se instala como extensión nueva o se elimina la anterior).
 - Se envía `ping` cada 30 s para evitar cierres por inactividad (documentación oficial de Deriv).
-- Si se corta la conexión estando el monitoreo activado, se reintenta conectar de manera controlada hasta 6 veces (2, 4, 8, 16, 30, 30 s), sin enviar órdenes.
-- Se consulta `{time:1}` al conectar y cada 5 minutos para estimar la diferencia entre reloj local y servidor. Los filtros de velas recientes, cotización observada y vencimientos usan esta hora sincronizada. Si no está disponible, se permite una tolerancia máxima de 5 s para cotizaciones adelantadas en el reloj local, sin inventar precios.
+- Si se corta la conexión, se reintenta hasta 6 veces (2, 4, 8, 16, 30, 30 s), incluso sin monitoreo. Si el monitoreo estaba activo, se reanuda después de recuperar hora y catálogo. No se envían órdenes.
+- Se consulta `{time:1}` al conectar y se renueva cada 5 minutos. Se usa un reloj monotónico y un margen por latencia y precisión del servidor. No se escanea ni registra con hora desconocida o caducada; no se sustituye por la hora local. Una sincronización que tarda más de 4 s se rechaza.
 - Al reconectar manualmente, el cierre del socket anterior ya no puede pisar los controles del socket nuevo.
 - El monitoreo se reanuda tras una reconexión exitosa. Los pendientes no se eliminan al desconectar y el panel muestra la hora de vencimiento de cada señal.
 - En el registro se muestran códigos de cierre WebSocket para ayudar a diagnosticar posibles problemas adicionales.
@@ -23,4 +23,31 @@ El monitoreo automático funciona solamente mientras el panel lateral siga abier
 3. Comprueba si los pendientes vencieron; pulsa `Evaluar señales vencidas`, o activa el monitoreo para que evalúe durante los escaneos automáticos.
 4. Exporta `Seguimiento CSV` y revisa los resultados.
 
-Verificación local: sintaxis JS + tests simulados; falta prueba real con la API desde Chrome.
+## Auditoría de estabilidad
+
+El informe de fallos, correcciones y límites está en [AUDIT.md](AUDIT.md). Se conserva el diseño, la clave de almacenamiento y las reglas técnicas de las señales. La entrada prospectiva espera un tick posterior a la emisión de la señal, cancela la suscripción y mantiene fija la duración seleccionada al iniciar el escaneo. Los registros heredados se conservan, pero sus resultados por cierre de vela se separan de la tasa por tick observado.
+
+Los pendientes nunca se eliminan para hacer sitio: al alcanzar 1.500 pendientes se detiene el registro de nuevas señales. La retención elimina primero registros resueltos antiguos. Las escrituras entre paneles se coordinan con Web Locks y se fusionan por ID. Si falla el almacenamiento, el registro indica que el resultado solo existe en memoria; expórtalo antes de cerrar el panel.
+
+### Pruebas
+
+Desde la raíz del repositorio, con Node.js 20 o posterior:
+
+```sh
+node --test tests/*.test.cjs
+```
+
+La suite funciona sin red ni paquetes adicionales y simula WebSocket, la API, los temporizadores y `chrome.storage.local`.
+
+Comprobaciones adicionales, opcionales para otras máquinas:
+
+```sh
+# Requiere Playwright y Chromium instalados; CHROMIUM_PATH permite elegir el ejecutable.
+node tests/browser-smoke.cjs
+# Requiere Python 3 y el paquete websockets con soporte de proxy.
+node tests/live-api-smoke.cjs
+```
+
+La primera usa el DOM real del panel con API y almacenamiento simulados; no instala la extensión. La segunda consulta datos públicos reales, sin autenticación ni operaciones: hora, catálogo, tres páginas de velas, ticks, cancelación de suscripción, historial al vencimiento y ping. No crea registros en tu perfil de Chrome.
+
+Resultados de la auditoría: 48 pruebas automáticas aprobadas, comprobación DOM aprobada y contrato público real aprobado. Sigue pendiente la prueba integral como extensión instalada en un Chrome que permita cargarla, incluyendo persistencia real y monitoreo prolongado. La política administrada de Chromium de este entorno bloquea extensiones adicionales.

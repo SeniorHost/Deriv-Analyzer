@@ -9,18 +9,33 @@ const FORWARD_MAX=1500;
 const historyCache=new Map();
 let saving=Promise.resolve(),settling=false,watchOn=false,watchTimer=null;
 let heartbeatTimer=null,reconnectTimer=null,reconnectAttempts=0,clockOffsetMs=null;
-let clockSyncAt=0,missedPings=0;
+let clockSyncAt=0,missedPings=0,clockAnchor=null,connectionTimer=null,apiReady=false;
+const CLOCK_MAX_AGE=10*60*1000;
+function invalidateClock(){clockAnchor=null;clockOffsetMs=null;clockSyncAt=0;}
+function clockUsable(){return clockAnchor!==null&&performance.now()-clockAnchor.monotonic<=CLOCK_MAX_AGE;}
+function assertSession(socket){if(ws!==socket||socket.readyState!==WebSocket.OPEN)throw new Error('La sesión API cambió');}
+function updateConnectionUI(){
+ const ready=apiReady&&clockUsable()&&!scanning;
+ $('scan').disabled=!ready;$('test').disabled=!ready;updateWatchUI();
+}
+function stopConnectionTimer(){if(connectionTimer!==null)clearTimeout(connectionTimer);connectionTimer=null;}
 const MAX_RECONNECT_ATTEMPTS=6;
-function serverNowMs(){return Date.now()+(Number.isFinite(clockOffsetMs)?clockOffsetMs:0);}
+function serverNowMs(){
+ if(!clockUsable())throw new Error('Hora Deriv no sincronizada o caducada; vuelve a conectar');
+ return clockAnchor.epochMs+performance.now()-clockAnchor.monotonic;
+}
 function serverNow(){return Math.floor(serverNowMs()/1000);}
-async function syncServerClock(){
- const begin=Date.now();
+function closedThrough(){return Math.floor((serverNowMs()-clockAnchor.uncertaintyMs)/1000);}
+async function syncServerClock(socket=ws){
+ const begin=performance.now();
  const response=await request({time:1},9000);
- const end=Date.now(),epoch=Number(response.time);
- if(!Number.isSafeInteger(epoch)||epoch<1_500_000_000)throw new Error('La API no devolvió hora Unix válida');
- clockOffsetMs=epoch*1000-(begin+end)/2;
- clockSyncAt=end;
- log(`Hora Deriv sincronizada: diferencia servidor/local ${Math.round(clockOffsetMs/100)/10}s; RTT ${end-begin}ms.`);
+ const end=performance.now(),epoch=Number(response.time),rtt=end-begin;
+ assertSession(socket);
+ if(!Number.isSafeInteger(epoch)||epoch<1_500_000_000||rtt>4000)throw new Error('Hora Unix inválida o sincronización demasiado lenta');
+ // La API redondea a segundos; conservar el margen de incertidumbre para no usar velas abiertas.
+ clockAnchor={epochMs:epoch*1000+rtt/2,monotonic:end,uncertaintyMs:1000+rtt/2};
+ clockOffsetMs=clockAnchor.epochMs-Date.now();clockSyncAt=end;
+ log(`Hora Deriv sincronizada: diferencia servidor/local ${Math.round(clockOffsetMs/100)/10}s; RTT ${Math.round(rtt)}ms.`);
 }
 function stopHeartbeat(){if(heartbeatTimer!==null)clearTimeout(heartbeatTimer);heartbeatTimer=null;}
 function startHeartbeat(socket){
@@ -30,48 +45,84 @@ function startHeartbeat(socket){
   if(ws!==socket||socket.readyState!==WebSocket.OPEN)return;
   try{
    await request({ping:1},9000);
+   assertSession(socket);
    missedPings=0;reconnectAttempts=0; // Reiniciar retroceso solo tras 30 s de conexión realmente funcional.
-   if(Date.now()-clockSyncAt>5*60*1000){
-    try{await syncServerClock();}catch(e){log('No se pudo renovar la hora del servidor: '+e.message);}
+   if(performance.now()-clockSyncAt>5*60*1000){
+    try{await syncServerClock(socket);}catch(e){if(ws===socket)disconnect(socket,'No se pudo renovar la hora del servidor: '+e.message);return;}
    }
   }catch(e){
+   if(ws!==socket)return;
    missedPings++;
    log(`Pulso de conexión fallido (${missedPings}/2): ${e.message}`);
-   if(missedPings>=2){try{socket.close();}catch{}return;}
+   if(missedPings>=2){disconnect(socket,'API sin respuesta');return;}
   }
   if(ws===socket&&socket.readyState===WebSocket.OPEN)startHeartbeat(socket);
  },30000);
 }
 function stopReconnect(){if(reconnectTimer!==null)clearTimeout(reconnectTimer);reconnectTimer=null;}
 function scheduleReconnect(){
- if(!watchOn||reconnectTimer!==null)return;
+ if(reconnectTimer!==null)return;
  if(reconnectAttempts>=MAX_RECONNECT_ATTEMPTS){
   log('Reconexión automática detenida tras 6 intentos. Pulsa Conectar API para continuar.');
   stopWatch();return;
  }
  const delay=Math.min(30000,2000*2**reconnectAttempts);
  reconnectAttempts++;
- log(`Monitoreo: reconexión automática ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} en ${Math.round(delay/1000)}s.`);
- reconnectTimer=setTimeout(()=>{reconnectTimer=null;if(watchOn)connect(true);},delay);
+ log(`API: reconexión automática ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} en ${Math.round(delay/1000)}s.`);
+ reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect(true);},delay);
  updateWatchUI();
 }
+let persistedForward=[];
 function persistForward(){
- const snapshot=forwardRecords.slice(-FORWARD_MAX);
- saving=saving.then(()=>chrome.storage.local.set({[FORWARD_KEY]:snapshot})).catch(e=>log('Almacenamiento: '+e.message));
- return saving;
+ const snapshot=structuredClone(forwardRecords);
+ const write=saving.catch(()=>{}).then(()=>navigator.locks.request(FORWARD_KEY,async()=>{
+  const stored=await chrome.storage.local.get(FORWARD_KEY);
+  const current=stored[FORWARD_KEY]??[];
+  if(!Array.isArray(current))throw new Error('Formato de almacenamiento desconocido; no se sobrescribirá');
+  const merged=FORWARD.mergeRecords(current,snapshot,persistedForward,FORWARD_MAX);
+  await chrome.storage.local.set({[FORWARD_KEY]:merged});
+  persistedForward=structuredClone(snapshot);
+  // Conservar referencias de las evaluaciones en curso y cambios posteriores a esta captura.
+  const latest=FORWARD.mergeRecords(merged,forwardRecords,snapshot,FORWARD_MAX);
+  const local=new Map(forwardRecords.map(r=>[FORWARD.recordKey(r),r]));
+  forwardRecords=latest.map(r=>{
+   const previous=local.get(FORWARD.recordKey(r));
+   return previous&&typeof previous==='object'?Object.assign(previous,r):r;
+  });
+ }));
+ saving=write;return write;
 }
+let storageReady=false;
 async function restoreForward(){try{
  const r=await chrome.storage.local.get(FORWARD_KEY);
+ if(r[FORWARD_KEY]!==undefined&&!Array.isArray(r[FORWARD_KEY]))throw new Error('Formato de almacenamiento desconocido; no se sobrescribirá');
  forwardRecords=Array.isArray(r[FORWARD_KEY])?r[FORWARD_KEY]:[];
- renderForward();log(`Seguimiento restaurado: ${forwardRecords.length} registros.`);
+ persistedForward=structuredClone(forwardRecords);storageReady=true;renderForward();log(`Seguimiento restaurado: ${forwardRecords.length} registros.`);
  }catch(e){log('Error al restaurar señales: '+e.message);}}
+async function requireForward(){await forwardReady;if(!storageReady)throw new Error('Almacenamiento sin restaurar; vuelve a abrir el panel');}
+function validForward(r){
+ return r&&typeof r.symbol==='string'&&/^[A-Za-z0-9_]{2,30}$/.test(r.symbol)&&
+ ['SUBE','BAJA'].includes(r.direction)&&Number.isFinite(r.entry)&&r.entry>0&&
+ Number.isSafeInteger(r.entryTime)&&Number.isSafeInteger(r.exitTime)&&r.entryTime>0&&r.exitTime<=8640000000000&&
+ (r.priceBasis===undefined||['OBSERVED_TICK','CANDLE_CLOSE_LEGACY'].includes(r.priceBasis))&&
+ [1,5].includes(r.horizon)&&r.exitTime-r.entryTime===r.horizon*60;
+}
+function trimForward(){
+ while(forwardRecords.length>FORWARD_MAX){
+  const index=forwardRecords.findIndex(r=>r&&['ACIERTO','FALLO','EMPATE'].includes(r.status));
+  if(index<0)break;forwardRecords.splice(index,1);
+ }
+}
 function renderForward(){
- const waiting=forwardRecords.filter(r=>r.status==='PENDIENTE').length;
- const complete=forwardRecords.filter(r=>['ACIERTO','FALLO','EMPATE'].includes(r.status));
+ const waiting=forwardRecords.filter(r=>r?.status==='PENDIENTE').length;
+ const complete=forwardRecords.filter(r=>validForward(r)&&r.priceBasis==='OBSERVED_TICK'&&Number.isFinite(r.exit)&&r.exit>0&&['ACIERTO','FALLO','EMPATE'].includes(r.status));
+ const legacy=forwardRecords.filter(r=>validForward(r)&&r.priceBasis!=='OBSERVED_TICK').length;
+ const invalid=forwardRecords.filter(r=>!validForward(r)).length;
  const wins=complete.filter(r=>r.status==='ACIERTO').length;
  const decisive=complete.filter(r=>r.status!=='EMPATE').length;
- $('forwardCount').textContent=`${waiting} pendientes · ${complete.length} resueltas · ${decisive?(wins/decisive*100).toFixed(1)+'% aciertos':'sin tasa todavía'}`;
+ $('forwardCount').textContent=`${waiting} pendientes · ${complete.length} resueltas · ${decisive?(wins/decisive*100).toFixed(1)+'% aciertos':'sin tasa todavía'}${legacy?' · '+legacy+' heredadas':''}${invalid?' · '+invalid+' inválidas conservadas':''}`;
  $('forwardRecent').textContent=forwardRecords.slice(-7).reverse().map(r=>{
+  if(!validForward(r))return 'Registro heredado o inválido conservado; revisar CSV.';
   const time=r.recordedAt||new Date(r.entryTime*1000).toISOString();
   const basis=r.priceBasis==='OBSERVED_TICK'?'tick observado':'cierre heredado';
   const due=r.status==='PENDIENTE'?` · vence ${new Date(r.exitTime*1000).toLocaleTimeString()}`:'';
@@ -83,8 +134,9 @@ function explainForward(){
  $('forwardInfo').textContent=`Último escaneo: ${forwardStats.saved} guardadas · ${forwardStats.wait} ESPERAR · ${forwardStats.stale} datos de vela antiguos · ${forwardStats.duplicate} repetidas · ${forwardStats.quote} cotizaciones no disponibles · ${forwardStats.invalid} datos inválidos. Entrada = tick observado al escanear, nunca cierre antiguo.`;
 }
 function resetForwardStats(){for(const k of Object.keys(forwardStats))forwardStats[k]=0;explainForward();}
-async function registerForwardItem(r){
- const h=Number($('horizon').value);
+async function registerForwardItem(r,h=Number($('horizon').value),socket=ws){
+ await requireForward();assertSession(socket);
+ if(cancelScan||![1,5].includes(h))return;
  if(r.error||!Number.isFinite(r.close)||!Number.isFinite(r.lastTime)){
   forwardStats.invalid++;explainForward();return;
  }
@@ -92,19 +144,24 @@ async function registerForwardItem(r){
   forwardStats.wait++;explainForward();return;
  }
  // Exige una vela cerrada reciente; NO exige que el análisis termine en <25 s.
- const closedAt=r.lastTime+60, now=serverNow(), age=now-closedAt;
+ const closedAt=r.lastTime+60, now=closedThrough(), age=now-closedAt;
  if(age<0||age>90){
   forwardStats.stale++;explainForward();log(`Seguimiento ${r.symbol}: cierre no reciente (${age}s).`);return;
  }
  // Una sola señal por símbolo, vela, duración y dirección: evita contar repetidamente la misma observación.
  const id=`${r.symbol}|${r.lastTime}|${h}|${r.direction}|TICK`;
- if(forwardRecords.some(x=>x.id===id)){
+ if(forwardRecords.some(x=>x?.id===id)){
   forwardStats.duplicate++;explainForward();return;
  }
  try{
   const receivedRequestAt=new Date().toISOString();
-  const m=await request({ticks:r.symbol},9000);
-  const t=FORWARD.currentTick(m,serverNow());
+  const signalAt=serverNowMs();
+  const m=await request({ticks:r.symbol,subscribe:1},9000,message=>{
+   const tick=FORWARD.currentTick(message,serverNow(),Math.ceil(clockAnchor.uncertaintyMs/1000));
+   return tick.ok&&tick.epoch>=Math.ceil((signalAt+clockAnchor.uncertaintyMs)/1000)&&tick.epoch>=closedAt;
+  });
+  assertSession(socket);if(cancelScan)return;
+  const t=FORWARD.currentTick(m,serverNow(),Math.ceil(clockAnchor.uncertaintyMs/1000));
   if(!t.ok || t.epoch<closedAt){
    forwardStats.quote++;explainForward();log(`Seguimiento ${r.symbol}: tick rechazado (${t.reason||'anterior al cierre usado'}).`);return;
   }
@@ -112,69 +169,77 @@ async function registerForwardItem(r){
   const record={id,symbol:r.symbol,name:r.name,entryTime:t.epoch,sourceCloseTime:r.lastTime,
    exitTime:t.epoch+h*60,direction:r.direction,entry:t.price,exit:null,score:r.score,
    horizon:h,status:'PENDIENTE',priceBasis:'OBSERVED_TICK',quoteLagSeconds:t.lag,
-   recordedAt:new Date().toISOString(),requestAt:receivedRequestAt,exitQuoteTime:null,
+   recordedAt:new Date().toISOString(),requestAt:receivedRequestAt,signalTime:signalAt/1000,exitQuoteTime:null,
    note:'Cotización pública observada tras emitir señal; no precio ejecutable, no contrato comprado'};
   // Revisar de nuevo duplicados tras la espera de red.
-  if(forwardRecords.some(x=>x.id===id)){
+  if(forwardRecords.some(x=>x?.id===id)){
    forwardStats.duplicate++;explainForward();return;
   }
-  forwardRecords.push(record);forwardRecords=forwardRecords.slice(-FORWARD_MAX);
-  await persistForward();forwardStats.saved++;renderForward();explainForward();
+  if(forwardRecords.filter(x=>x?.status==='PENDIENTE').length>=FORWARD_MAX)throw new Error('Límite de pendientes alcanzado; exporta y evalúa antes de registrar más');
+  forwardRecords.push(record);trimForward();renderForward();
+  try{await persistForward();}catch(e){log('Señal solo en memoria; no se pudo guardar: '+e.message);return;}
+  forwardStats.saved++;explainForward();
   log(`Seguimiento GUARDADO: ${r.symbol} ${r.direction==='SUBE'?'Rise':'Fall'}, entrada tick ${t.price} a ${new Date(t.epoch*1000).toLocaleTimeString()}, cierre usado ${age}s atrás.`);
  }catch(e){
   forwardStats.quote++;explainForward();log(`Seguimiento ${r.symbol}: no se obtuvo cotización (${e.message}).`);
  }
 }
 async function checkForward(){
+ try{await requireForward();serverNow();}catch(e){log(e.message);return;}
  if(settling){log('Ya se están evaluando señales.');return;}
  if(!ws||ws.readyState!==WebSocket.OPEN){log('Conecta la API para evaluar pendientes.');return;}
- const now=serverNow();
- const due=forwardRecords.filter(r=>r.status==='PENDIENTE' && now>=r.exitTime+(r.priceBasis==='OBSERVED_TICK'?4:60));
+ const socket=ws,now=closedThrough();
+ const due=forwardRecords.filter(r=>validForward(r)&&r.status==='PENDIENTE' && now>=r.exitTime+(r.priceBasis==='OBSERVED_TICK'?4:60));
  if(!due.length){
-  const pendingCount=forwardRecords.filter(r=>r.status==='PENDIENTE').length;
+  const pendingCount=forwardRecords.filter(r=>r?.status==='PENDIENTE').length;
   log(pendingCount?`Hay ${pendingCount} pendiente(s), pero aún no vence ninguna. Consulta tras su duración simulada.`:'No hay señales pendientes: ejecuta un escaneo con SUBE/BAJA o activa el monitoreo.');return;
  }
  settling=true;$('settleForward').disabled=true;
- let resolved=0,missed=0,cursor=0;
+ let resolved=0,missed=0,notSaved=0,cursor=0;
  try{
   async function worker(){
    while(cursor<due.length){
     const item=due[cursor++];
+    if(ws!==socket)break;
     try{
      if(item.priceBasis==='OBSERVED_TICK'){
       const response=await request({ticks_history:item.symbol,end:String(item.exitTime),count:10,style:'ticks'},12000);
+      assertSession(socket);
       const tick=FORWARD.exitTick(response,item.exitTime,15);
       if(!tick.ok){missed++;log(`Sin tick de salida usable para ${item.symbol}: ${tick.reason}`);continue;}
       item.exit=tick.price;item.exitQuoteTime=tick.epoch;
      }else{
       // Compatibilidad con registros de v1.6/v1.7: nunca mezclar cierre de vela con tick observado.
       const response=await request({ticks_history:item.symbol,end:String(item.exitTime),count:8,style:'candles',granularity:60},12000);
+      assertSession(socket);
       const candle=rawCandles(response).find(c=>c.epoch===item.exitTime-60);
       if(!candle){missed++;log(`Sin vela de salida exacta para registro antiguo ${item.symbol}.`);continue;}
       item.exit=candle.close;item.exitQuoteTime=candle.epoch+60;
       item.priceBasis='CANDLE_CLOSE_LEGACY';
      }
      item.status=FORWARD.outcome(item.entry,item.exit,item.direction);
-     item.checkedAt=new Date().toISOString();resolved++;await persistForward();renderForward();
+     item.checkedAt=new Date().toISOString();
+     try{await persistForward();resolved++;}catch(e){notSaved++;log(`Resultado de ${item.symbol} solo en memoria; no se pudo guardar: ${e.message}`);}
+     renderForward();
     }catch(e){missed++;log(`Error al evaluar ${item.symbol}: ${e.message}`);}
    }
   }
   await Promise.all(Array.from({length:Math.min(3,due.length)},()=>worker()));
-  renderForward();log(`Evaluación: ${resolved} señales resueltas, ${missed} sin tick/vela fiable (siguen pendientes).`);
+  renderForward();log(`Evaluación: ${resolved} señales resueltas, ${missed} sin tick/vela fiable (siguen pendientes), ${notSaved} resultados solo en memoria.`);
  }finally{settling=false;$('settleForward').disabled=false;}
 }
 function exportForward(){
  if(!forwardRecords.length)log('Seguimiento vacío: CSV con cabeceras. Escanea o activa monitoreo; se mostrará el motivo de los descartes.');
  const cols=['symbol','name','recordedAt','entryTimeUTC','exitTimeUTC','direction','riseFall','entry','exit','status','score','horizonMinutes','priceBasis','sourceCloseTimeUTC','exitQuoteTimeUTC','quoteLagSeconds','checkedAt','note'];
  const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';
- const iso=v=>Number.isSafeInteger(v)?new Date(v*1000).toISOString():'';
- const rows=forwardRecords.map(r=>[r.symbol,r.name,r.recordedAt,iso(r.entryTime),iso(r.exitTime),r.direction,r.direction==='SUBE'?'Rise':'Fall',r.entry,r.exit,r.status,r.score,r.horizon,r.priceBasis||'CANDLE_CLOSE_LEGACY',iso(r.sourceCloseTime),iso(r.exitQuoteTime),r.quoteLagSeconds,r.checkedAt,r.note].map(esc).join(','));
+ const iso=v=>Number.isSafeInteger(v)&&Number.isFinite(new Date(v*1000).getTime())?new Date(v*1000).toISOString():'';
+ const rows=forwardRecords.map(value=>{const r=value&&typeof value==='object'?value:{};return [r.symbol,r.name,r.recordedAt,iso(r.entryTime),iso(r.exitTime),r.direction,r.direction==='SUBE'?'Rise':'Fall',r.entry,r.exit,r.status,r.score,r.horizon,r.priceBasis||'CANDLE_CLOSE_LEGACY',iso(r.sourceCloseTime),iso(r.exitQuoteTime),r.quoteLagSeconds,r.checkedAt,r.note].map(esc).join(',');});
  const url=URL.createObjectURL(new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));
- const a=document.createElement('a');a.href=url;a.download='deriv-seguimiento-prospectivo-v18-'+Date.now()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+ const a=document.createElement('a');a.href=url;a.download='deriv-seguimiento-prospectivo-v19-'+Date.now()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
 }
 // Solo dentro del panel abierto. No hay vigilancia remota ni escaneos con el navegador cerrado.
 function updateWatchUI(){
- const connected=Boolean(ws&&ws.readyState===WebSocket.OPEN);
+ const connected=Boolean(apiReady&&clockUsable()&&ws&&ws.readyState===WebSocket.OPEN);
  $('watch').textContent=watchOn?'Pausar monitoreo':'Activar monitoreo cada minuto';
  $('watchStatus').textContent=watchOn?(connected?'Activo · mientras el panel esté abierto':'En pausa · intentando reconectar API'):'Apagado · requiere panel abierto';
  $('watch').disabled=!connected&&!watchOn;
@@ -185,7 +250,7 @@ function stopWatch(){
 }
 function scheduleWatch(){
  clearWatchTimer();
- if(!watchOn||!ws||ws.readyState!==WebSocket.OPEN)return;
+ if(!watchOn||!apiReady||!clockUsable()||!ws||ws.readyState!==WebSocket.OPEN)return;
  const ms=60000-(serverNowMs()%60000)+8000; // 8 s después del siguiente cierre en hora del servidor.
  watchTimer=setTimeout(async()=>{
   watchTimer=null;
@@ -204,77 +269,82 @@ function scheduleWatch(){
 }
 function toggleWatch(){
  if(watchOn){stopWatch();log('Monitoreo detenido por el usuario.');return;}
- if(!ws||ws.readyState!==WebSocket.OPEN){log('Conecta primero la API.');return;}
+ if(!apiReady||!clockUsable()){log('Conecta y sincroniza primero la API.');return;}
  watchOn=true;updateWatchUI();scheduleWatch();log('Monitoreo activo: un escaneo por minuto y evaluación de señales vencidas. Sin compras.');
 }
 
 function log(t){$('log').textContent=new Date().toLocaleTimeString()+' · '+t+'\n'+$('log').textContent.slice(0,2200);}
 function state(s,ok=false){$('status').textContent=s;$('status').className='pill'+(ok?' ok':'');}
-function request(data,timeout=16000){return new Promise((resolve,reject)=>{
- if(!ws||ws.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
+function forgetSubscription(socket,id){
+ if(!id||ws!==socket||socket.readyState!==WebSocket.OPEN)return;
+ request({forget:id},5000).catch(e=>{if(ws===socket)log('No se pudo cancelar suscripción: '+e.message);});
+}
+function request(data,timeout=16000,accept=null){return new Promise((resolve,reject)=>{
+ const socket=ws;
+ if(!socket||socket.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
  const req_id=++requestId;
- const timer=setTimeout(()=>{pending.delete(req_id);reject(new Error('No llegó respuesta de API (timeout)'));},timeout);
- pending.set(req_id,{resolve,reject,timer});
- ws.send(JSON.stringify({...data,req_id}));
+ const finish=(error,message)=>{
+  const p=pending.get(req_id);if(!p)return;
+  pending.delete(req_id);clearTimeout(p.timer);
+  if(p.subscriptionId)forgetSubscription(socket,p.subscriptionId);
+  if(error)reject(error);else resolve(message);
+ };
+ const timer=setTimeout(()=>finish(new Error('No llegó respuesta de API (timeout)')),timeout);
+ pending.set(req_id,{socket,resolve,reject,timer,finish,accept,subscriptionId:null});
+ try{socket.send(JSON.stringify({...data,req_id}));}catch(e){finish(e);}
  });}
-function cleanPending(error){for(const p of pending.values()){clearTimeout(p.timer);p.reject(error)}pending.clear();}
+function cleanPending(error){for(const p of [...pending.values()]){clearTimeout(p.timer);p.reject(error)}pending.clear();}
+function disconnect(socket,reason){
+ if(ws!==socket)return;
+ ws=null;apiReady=false;symbols=[];invalidateClock();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
+ socket.onopen=socket.onclose=socket.onerror=socket.onmessage=null;
+ try{socket.close();}catch{}
+ cancelScan=true;cleanPending(new Error(reason));
+ state('Desconectada');$('detail').textContent=reason;updateConnectionUI();log(reason);scheduleReconnect();
+}
 function connect(isRetry=false){
- stopReconnect();stopHeartbeat();clearWatchTimer();
+ stopReconnect();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
+ apiReady=false;symbols=[];invalidateClock();cancelScan=true;
  if(ws){
-  const old=ws;ws=null;
-  // Deshabilitar sus callbacks para evitar que el cierre del socket viejo apague el nuevo.
-  old.onclose=null;old.onerror=null;old.onmessage=null;old.onopen=null;
+  const old=ws;ws=null;old.onclose=old.onerror=old.onmessage=old.onopen=null;
   try{old.close();}catch{}
  }
  cleanPending(new Error('Reconectando'));
  if(!isRetry)reconnectAttempts=0;
  state(isRetry?'Reconectando...':'Conectando...');
- $('scan').disabled=true;$('test').disabled=true;updateWatchUI();
+ $('detail').textContent='Esperando conexión, hora y catálogo públicos.';updateConnectionUI();
  let socket;
  try{socket=new WebSocket(API);ws=socket;}
- catch(e){state('Error');log(e.message);if(watchOn)scheduleReconnect();return;}
+ catch(e){state('Error');log(e.message);scheduleReconnect();return;}
+ connectionTimer=setTimeout(()=>disconnect(socket,'Tiempo agotado al abrir WebSocket'),12000);
  socket.onopen=async()=>{
   if(ws!==socket)return;
-  state('Conectada',true);log(isRetry?'API reconectada; señales guardadas intactas.':'API pública oficial conectada, solo lectura.');
-  missedPings=0;
-  $('scan').disabled=false;$('test').disabled=false;updateWatchUI();
-  startHeartbeat(socket);
+  stopConnectionTimer();missedPings=0;state('Sincronizando...');startHeartbeat(socket);
   try{
-   await syncServerClock();
-  }catch(e){log('Sin sincronización de hora: '+e.message+'; se usará hora local con tolerancia limitada.');}
-  if(ws!==socket)return;
-  try{
-   const m=await request({active_symbols:'brief'});
-   if(ws!==socket)return;
-   const rawSymbols=Array.isArray(m.active_symbols)?m.active_symbols:[];
-   symbols=rawSymbols.map(normalizeSymbol).filter(Boolean);
-   log(`API catálogo: ${rawSymbols.length} recibidos, ${symbols.length} normalizados. Primer código: ${symbols[0]?.symbol||'ninguno'}`);
+   await syncServerClock(socket);assertSession(socket);
+   const m=await request({active_symbols:'brief'});assertSession(socket);
+   symbols=(Array.isArray(m.active_symbols)?m.active_symbols:[]).map(normalizeSymbol).filter(Boolean);
+   if(!symbols.length)throw new Error('El catálogo público está vacío');
+   apiReady=true;state('Conectada',true);updateConnectionUI();
    $('detail').textContent=`${symbols.length} símbolos obtenidos por API pública. No requiere contraseña.`;
-   log(`Símbolos recibidos: ${symbols.length}`);
-  }catch(e){log('No se pudo obtener catálogo: '+e.message);}
-  if(ws!==socket)return;
-  if(watchOn){scheduleWatch();log('Monitoreo reanudado después de la conexión.');}
+   log(`API pública conectada: ${symbols.length} símbolos, solo lectura.`);
+   if(watchOn)scheduleWatch();
+  }catch(e){if(ws===socket)disconnect(socket,'No se pudo preparar la API: '+e.message);}
  };
  socket.onmessage=e=>{
   if(ws!==socket)return;
   let msg;try{msg=JSON.parse(e.data)}catch{return;}
+  if(!msg||typeof msg!=='object')return;
   const id=msg.req_id??msg.echo_req?.req_id;
-  const p=pending.get(id);if(!p)return;
-  clearTimeout(p.timer);pending.delete(id);
-  if(msg.error)p.reject(new Error(msg.error.message||msg.error.code||'Error API'));
-  else p.resolve(msg);
+  const p=pending.get(id);
+  if(!p){if(msg.subscription?.id)forgetSubscription(socket,msg.subscription.id);return;}
+  if(p.socket!==socket)return;
+  if(msg.subscription?.id)p.subscriptionId=msg.subscription.id;
+  if(msg.error){p.finish(new Error(msg.error.message||msg.error.code||'Error API'));return;}
+  try{if(!p.accept||p.accept(msg))p.finish(null,msg);}catch(error){p.finish(error);}
  };
- socket.onerror=()=>{if(ws===socket)log('Error en conexión WebSocket');};
- socket.onclose=event=>{
-  if(ws!==socket)return;
-  ws=null;stopHeartbeat();clearWatchTimer();
-  state('Desconectada');$('scan').disabled=true;$('test').disabled=true;
-  cancelScan=true;
-  cleanPending(new Error('WebSocket cerrado'));
-  log(`Conexión cerrada (código ${event?.code??'desconocido'}, motivo ${event?.reason||'no informado'}).`);
-  updateWatchUI();
-  if(watchOn)scheduleReconnect();
- };
+ socket.onerror=()=>disconnect(socket,'Error en conexión WebSocket');
+ socket.onclose=event=>disconnect(socket,`Conexión cerrada (código ${event?.code??'desconocido'}, motivo ${event?.reason||'no informado'}).`);
 }
 
 // API Nueva (2026): underlying_symbol / underlying_symbol_name replaces symbol / display_name.
@@ -299,14 +369,18 @@ function chooseSymbols(){const market=$('market').value;
 }
 function rawCandles(m){
  const raw=Array.isArray(m.candles)?m.candles:(Array.isArray(m.history?.candles)?m.history.candles:[]);
- const byTime=new Map();
- for(const v of raw){const c={epoch:Number(v.epoch??v.time),open:Number(v.open),high:Number(v.high),low:Number(v.low),close:Number(v.close)};
-  if(Object.values(c).every(Number.isFinite)&&c.epoch>0&&c.high>=Math.max(c.open,c.close,c.low)&&c.low<=Math.min(c.open,c.close,c.high))byTime.set(c.epoch,c);
+ const byTime=new Map(),num=v=>v===null||v===undefined||v===''?NaN:Number(v);
+ for(const v of raw){
+  if(!v||typeof v!=='object')continue;
+  const c={epoch:num(v.epoch??v.time),open:num(v.open),high:num(v.high),low:num(v.low),close:num(v.close)};
+  if(Number.isSafeInteger(c.epoch)&&c.epoch>0&&c.epoch%60===0&&
+   ['open','high','low','close'].every(k=>Number.isFinite(c[k])&&c[k]>0)&&
+   c.high>=Math.max(c.open,c.close,c.low)&&c.low<=Math.min(c.open,c.close,c.high))byTime.set(c.epoch,c);
  }
  return [...byTime.values()].sort((a,b)=>a.epoch-b.epoch);
 }
 function validateCandles(arr){
- const now=serverNow();
+ const now=closedThrough();
  const closed=arr.filter(c=>c.epoch+60<=now);
  if(closed.length<90)throw new Error(`Solo ${closed.length} velas cerradas`);
  const latest=closed.at(-1).epoch;
@@ -315,38 +389,48 @@ function validateCandles(arr){
  if(gaps>closed.length*.05)throw new Error(`Historial con ${gaps} huecos de minuto`);
  return closed;
 }
-async function loadHistory(symbol){
+async function loadHistory(symbol,socket=ws){
+ assertSession(socket);
  const previous=historyCache.get(symbol);
  if(previous?.candles?.length>=90){
-  try{
-   const m=await request({ticks_history:symbol,end:'latest',count:180,style:'candles',granularity:60},12000);
+  const lastCached=previous.candles.at(-1).epoch;
+  const latestClosed=Math.floor(closedThrough()/60)*60-60;
+  if(lastCached===latestClosed)return {candles:validateCandles(previous.candles),pages:0,mode:'rápida'};
+  const count=Math.ceil((serverNow()-lastCached)/60)+2;
+  if(count<=180){
+   // Un error de transporte no se resuelve descargando tres páginas más.
+   const m=await request({ticks_history:symbol,end:'latest',count:Math.max(3,count),style:'candles',granularity:60},12000);
+   assertSession(socket);if(cancelScan)throw new Error('Cancelado');
    const fresh=rawCandles(m);
-   if(!fresh.length)throw new Error('Sin velas en actualización rápida');
-   const lastCached=previous.candles.at(-1).epoch;
-   if(fresh[0].epoch>lastCached+60)throw new Error('Historial discontinuo: se recargará');
-   const merged=new Map(previous.candles.map(c=>[c.epoch,c]));
-   for(const candle of fresh)merged.set(candle.epoch,candle);
-   const candles=validateCandles([...merged.values()].sort((a,b)=>a.epoch-b.epoch).slice(-2400));
-   historyCache.set(symbol,{candles});
-   log(`${symbol}: actualización rápida, ${fresh.length} velas solicitadas`);
-   return {candles,pages:1,mode:'rápida'};
-  }catch(e){log(`${symbol}: caché no usable (${e.message}); reconstruyendo historial.`);}
+   if(fresh.length&&fresh[0].epoch<=lastCached+60){
+    const merged=new Map(previous.candles.map(c=>[c.epoch,c]));
+    for(const candle of fresh)merged.set(candle.epoch,candle);
+    const candles=validateCandles([...merged.values()].sort((a,b)=>a.epoch-b.epoch)).slice(-2400);
+    historyCache.set(symbol,{candles});
+    log(`${symbol}: actualización rápida, ${fresh.length} velas recibidas`);
+    return {candles,pages:1,mode:'rápida'};
+   }
+   log(`${symbol}: actualización sin solapamiento; reconstruyendo historial.`);
+  }
  }
  const all=new Map();let end='latest',pages=0;
  for(let page=0;page<3;page++){
-  if(cancelScan)throw new Error('Cancelado');
-  const response=await request({ticks_history:symbol,end:String(end),count:800,style:'candles',granularity:60},12000);
+  assertSession(socket);if(cancelScan)throw new Error('Cancelado');
+  // Una vela abierta puede ocupar una plaza de la primera página.
+  const count=page===0?801:800;
+  const response=await request({ticks_history:symbol,end:String(end),count,style:'candles',granularity:60},12000);
+  assertSession(socket);if(cancelScan)throw new Error('Cancelado');
   const chunk=rawCandles(response);
   log(`${symbol}: bloque ${page+1}: ${chunk.length} velas recibidas`);
   if(!chunk.length)break;
   for(const c of chunk)all.set(c.epoch,c);
   pages++;
-  if(chunk.length<200)break;
   const earliest=chunk[0].epoch;
   if(end!=='latest' && earliest>=Number(end))break;
   end=earliest-1;
+  if(chunk.length<count)break;
  }
- const candles=validateCandles([...all.values()].sort((a,b)=>a.epoch-b.epoch));
+ const candles=validateCandles([...all.values()].sort((a,b)=>a.epoch-b.epoch)).slice(-2400);
  historyCache.set(symbol,{candles});
  return {candles,pages,mode:'completa'};
 }
@@ -354,7 +438,8 @@ async function loadHistory(symbol){
 let cancelScan=false;
 async function scan(single=false){
  if(scanning){log('Ya hay un escaneo en curso.');return;}
- if(!ws||ws.readyState!==WebSocket.OPEN){log('API desconectada; pulsa Conectar API.');return;}
+ if(!apiReady||!clockUsable()){updateConnectionUI();log('Conecta y sincroniza la API antes de escanear.');return;}
+ const socket=ws;
  scanning=true;cancelScan=false;$('scan').disabled=true;$('test').disabled=true;$('cancel').disabled=false;
  results=[];allTrades=[];resetForwardStats();$('results').replaceChildren();
  let selected=[],done=0,failed=0,cursor=0;
@@ -381,12 +466,13 @@ async function scan(single=false){
     const item=selected[cursor++];
     try{
      log('Solicitando velas: '+item.symbol);
-     const {candles,pages,mode}=await loadHistory(item.symbol);
+     const {candles,pages,mode}=await loadHistory(item.symbol,socket);
      if(cancelScan)break;
      const technical=TA.calculate(candles),last=candles.length-1,signal=TA.signal(candles,technical,last),back=VALIDATION.run(candles,technical,h,item.symbol);
      allTrades.push(...back.records);
      const row={symbol:item.symbol,name:item.display_name||item.symbol,type:symbolType(item),direction:signal.dir,score:signal.score,reason:signal.why,lastTime:candles[last].epoch,close:candles[last].close,samples:candles.length,back,pages,quality:'Velas cerradas validables',mode};
-     results.push(row);await registerForwardItem(row);
+     results.push(row);
+     try{await registerForwardItem(row,h,socket);}catch(e){log(`Seguimiento ${item.symbol} no registrado: ${e.message}`);}
      log(item.symbol+': '+candles.length+' velas válidas');
     }catch(e){
      failed++;
@@ -413,8 +499,8 @@ async function scan(single=false){
   const message='ERROR GENERAL durante preparación o escaneo: '+String(e?.stack||e?.message||e);
   log(message);setProgress('Error: revisar Registro');
  }finally{
-  scanning=false;$('scan').disabled=!(ws&&ws.readyState===WebSocket.OPEN);
-  $('test').disabled=$('scan').disabled;$('cancel').disabled=true;
+  scanning=false;updateConnectionUI();
+  $('cancel').disabled=true;
   if(selected.length && $('count').textContent!=='Error: revisar Registro')setProgress(`${cancelScan?'Cancelado':'Finalizado'} · ${done}/${selected.length} · ${failed} errores`);
  }
 }
@@ -464,9 +550,9 @@ $('export').addEventListener('click',exportCsv);
 
 $('settleForward').addEventListener('click',checkForward);
 $('watch').addEventListener('click',toggleWatch);
-window.addEventListener('beforeunload',stopWatch);
+window.addEventListener('beforeunload',()=>{stopWatch();stopHeartbeat();stopConnectionTimer();const old=ws;ws=null;if(old){old.onclose=old.onerror=null;old.close();}cleanPending(new Error('Panel cerrado'));});
 $('exportForward').addEventListener('click',exportForward);
-restoreForward();
+const forwardReady=restoreForward();
 explainForward();
 
 updateWatchUI();
