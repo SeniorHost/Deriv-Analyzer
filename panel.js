@@ -328,7 +328,7 @@ function connect(isRetry=false){
    apiReady=true;state('Conectada',true);updateConnectionUI();
    $('detail').textContent=`${symbols.length} símbolos obtenidos por API pública. No requiere contraseña.`;
    log(`API pública conectada: ${symbols.length} símbolos, solo lectura.`);
-   if(watchOn)scheduleWatch();
+   if(typeof ROOM_UI!=='undefined'){await ROOM_UI.connected();}else if(watchOn)scheduleWatch();
   }catch(e){if(ws===socket)disconnect(socket,'No se pudo preparar la API: '+e.message);}
  };
  socket.onmessage=e=>{
@@ -359,7 +359,7 @@ function normalizeSymbol(item){
 function symbolType(s){const x=[s.market,s.market_display_name,s.submarket,s.submarket_display_name,s.subgroup,s.underlying_symbol_type,s.display_name,s.symbol].join(' ').toLowerCase();
  if(/synthetic|derived|volatility|índice de volatilidad|indices de volatilidad/.test(x))return 'synthetic';
  if(/forex|major pairs|minor pairs|currency|fx/.test(x))return 'forex';return 'other';}
-function chooseSymbols(){const market=$('market').value;
+function chooseSymbols(){if(typeof ROOM_UI!=='undefined')return ROOM.pool(symbols,ROOM_UI.selected);const market=$('market').value;
  const filtered=symbols.filter(s=>s && typeof s.symbol==='string' && /^[A-Za-z0-9_]{2,30}$/.test(s.symbol) && (market==='all'||symbolType(s)===market));
  const candidates=filtered.sort((a,b)=>{
   const n=s=>/volatility (10|25|50|75|100)( index)?\b|índice de volatilidad|EUR\/USD|USD\/JPY/i.test(s.display_name||'')?0:1;
@@ -459,7 +459,7 @@ async function scan(single=false){
   log('Etapa 2/3: '+selected.length+' activos seleccionados. Primer símbolo: '+selected[0].symbol);
   setProgress(`0/${selected.length} · solicitando velas...`);
   log('Etapa 2/3: solicitud de historial iniciada.');
-  const h=Number($('horizon').value);
+  const h=typeof ROOM_UI!=='undefined'?5:Number($('horizon').value);
   const update=()=>setProgress(`${done}/${selected.length} completados · ${failed} errores`);
   async function worker(){
    while(cursor<selected.length&&!cancelScan){
@@ -484,16 +484,6 @@ async function scan(single=false){
   await Promise.all(Array.from({length:Math.min(single?1:3,selected.length)},()=>worker()));
   log('Etapa 3/3: resultados calculados.');
   results.sort((a,b)=>Number(b.back?.enough)-Number(a.back?.enough)||b.score-a.score);render();update();
-  if(!cancelScan && !single){
-   const best=results.find(x=>x.back?.enough&&x.score>0&&x.direction!=='ESPERAR');
-   if($('auto').checked&&!best)log('No se cambia de gráfico: ninguna señal alcanzó los requisitos mínimos de validación.');
-   if($('auto').checked&&best){
-    chrome.runtime.sendMessage({type:'NAVIGATE_DERIV',symbol:best.symbol},res=>{
-     if(chrome.runtime.lastError)log(chrome.runtime.lastError.message);
-     else log(res?.ok?'Gráfico cambiado a '+best.name:'No se cambió el gráfico: '+(res?.error||'Error'));
-    });
-   }
-  }
   log(`Escaneo ${cancelScan?'cancelado':'finalizado'}: ${done} consultados, ${failed} errores. Ninguna orden ejecutada.`);
  }catch(e){
   const message='ERROR GENERAL durante preparación o escaneo: '+String(e?.stack||e?.message||e);
@@ -506,6 +496,7 @@ async function scan(single=false){
 }
 
 function render(){
+ if(typeof ROOM_UI!=='undefined'){ROOM_UI.render(results);return;}
  $('count').textContent=`${results.filter(x=>x.score>=0).length} evaluados`;
  $('results').replaceChildren();
  for(const r of [...results].sort((a,b)=>Number(b.back?.enough)-Number(a.back?.enough)||b.score-a.score)){

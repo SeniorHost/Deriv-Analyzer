@@ -2,9 +2,9 @@ name: Validate candidate
 
 on:
   push:
-    branches: [audit/v1.9-stability]
+    branches: [audit/v1.9-stability, feature/trading-room]
   pull_request:
-    branches: [main]
+    branches: [main, audit/v1.9-stability]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   validation:
-    name: Syntax and 48 offline tests (Node.js 20)
+    name: Syntax and offline tests (Node.js 20)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

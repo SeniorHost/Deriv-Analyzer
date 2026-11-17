@@ -1,5 +1,17 @@
 # Deriv Analyzer v1.9 — estabilidad de conexión y hora de Deriv
 
+## Mi sala de trading
+
+La candidata `feature/trading-room` parte de la rama auditada. Conecta la API pública para iniciar el análisis automático mientras el panel permanezca abierto. Se proponen seis activos iniciales (o los que haya disponibles), ampliables hasta doce, sin exigir pestañas abiertas. Usa «Editar activos» para añadir, quitar o reemplazar, y «Revisar gráficos de Deriv» para consultar símbolos visibles en URLs de `dtrader.deriv.com`, sin cambiar la selección. Esa consulta no detecta los gráficos internos de la web. Un símbolo detectado solo se incorpora reemplazando explícitamente uno seleccionado; solo «Añadir» aumenta el número de activos. Si la URL no incluye un símbolo válido, no se infiere a partir del título ni se inspecciona tu cuenta.
+
+La selección persiste localmente, incluso si decides dejarla vacía. Cada tarjeta muestra dirección, hora del cierre analizado, vigencia y puntuación técnica. Una alerta dura hasta el siguiente minuto; el seguimiento prospectivo dura cinco minutos desde el tick observado. Una alerta caducada pasa a ESPERAR: no es una invitación a entrar tarde. El identificador de vela evita repetir alertas, también al reabrir el panel.
+
+El escáner sigue evaluando hasta doce activos del catálogo, priorizando tu selección. Las alternativas requieren señal vigente, puntuación mínima de 60, diez puntos sobre el mínimo de las señales vigentes de la sala (o sobre cero si no hay ninguna), y el filtro retrospectivo auditado. Estos criterios son técnicos y exploratorios. «Aprobar reemplazo» cambia únicamente la selección: nunca cambia pestañas ni realiza operaciones. «Ir a Deriv (sin cambiar gráficos)» enfoca una pestaña de Deriv existente, priorizando la URL del símbolo. No afirma activar el gráfico interno ni cambia URLs. Si no hay ninguna pestaña, ofrece un botón aparte para crearla explícitamente. Un reemplazo conserva el número de seleccionados y no permite duplicados. Las selecciones de más de seis guardadas previamente se conservan; si se añadieron por error, usa «Quitar», sin que la extensión adivine cuáles eliminar.
+
+Las primeras 151 señales prospectivas tuvieron 75 aciertos y 76 fallos. **No existe ventaja financiera demostrada. La puntuación no es una probabilidad.** Se conservan las exportaciones, el almacenamiento prospectivo previo y los mecanismos de conexión auditados. No se solicitan credenciales.
+
+La suite ampliada se ejecuta con `node --test tests/*.test.cjs`: 71 pruebas, con los 59 casos de la candidata anterior y doce regresiones de sincronización. El caso anterior que esperaba crear una pestaña cuando otro activo ya estaba abierto ahora exige enfocar Deriv sin crearla; se conserva su cobertura de navegación. El workflow valida pushes a la rama de la sala y PR hacia la rama auditada o `main`.
+
 ## Correcciones tras la prueba real de v1.8
 
 - Las dos señales prospectivas observadas en la v1.8 (`1HZ10V` y `1HZ30V`) demostraron que el registro ya funciona; fueron almacenadas en `chrome.storage.local`. Esta versión usa la misma clave `deriv_analyzer_forward_v16`, por lo que se mantienen mientras se cargue como **actualización de la misma extensión** (no si se instala como extensión nueva o se elimina la anterior).
