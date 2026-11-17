@@ -474,7 +474,7 @@ async function scan(single=false){
      const technical=TA.calculate(candles),last=candles.length-1,signal=TA.signal(candles,technical,last),back=VALIDATION.run(candles,technical,h,item.symbol);
      allTrades.push(...back.records);
      if(typeof CMP_UI!=='undefined'){try{CMP_UI.onHistory(item.symbol,candles,technical);}catch(e){log('Comparador no actualizado: '+e.message);}}
-     const row={symbol:item.symbol,name:item.display_name||item.symbol,type:symbolType(item),direction:signal.dir,score:signal.score,reason:signal.why,lastTime:candles[last].epoch,close:candles[last].close,samples:candles.length,back,pages,quality:'Velas cerradas validables',mode};
+     const row={emittedAt:serverNow(),symbol:item.symbol,name:item.display_name||item.symbol,type:symbolType(item),direction:signal.dir,score:signal.score,reason:signal.why,lastTime:candles[last].epoch,close:candles[last].close,samples:candles.length,back,pages,quality:'Velas cerradas validables',mode};
      results.push(row);
      if(typeof ADAPT_UI!=='undefined'){try{ADAPT_UI.onHistory(item,candles,technical);}catch(e){log('Lector no actualizado: '+e.message);}}
      if(typeof CMP_UI!=='undefined'){try{void CMP_UI.signal(row).catch(e=>log('Comparador: '+e.message));}catch(e){log('Comparador: '+e.message);}}

@@ -1,8 +1,8 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mi sala de trading · Deriv Analyzer</title><link rel="stylesheet" href="style.css"></head><body>
 <header><div class="logo">◈ DERIV <span>ANALYZER</span></div><div class="muted">Mi sala de trading · Supervisión manual</div></header>
-<div class="notice">Señales técnicas experimentales, no instrucciones de compra. Las primeras 151 señales: 75 aciertos y 76 fallos. No hay ventaja financiera demostrada. La puntuación técnica NO es una probabilidad.</div>
+<div class="notice">Señales técnicas experimentales, no instrucciones de compra. Sin ventaja financiera demostrada. Las decisiones son manuales; no se realizan operaciones.</div>
 <section><div class="line"><strong>Conexión oficial</strong><span id="status" class="pill">Desconectado</span></div><div id="detail" class="muted">Sin usuario, clave API ni acceso a tu cuenta.</div><div class="line"><button id="connect">Conectar API</button><button id="test" disabled>Probar 1 activo</button><button id="scan" disabled>Escanear 12</button><button id="cancel" disabled>Cancelar</button></div></section>
-<section aria-label="Mi selección"><div class="line"><strong>Mi sala de trading</strong><span id="roomCount" class="muted">Hasta 12 activos</span></div>
+<div class="line"><button id="watch" disabled>Activar monitoreo cada minuto</button><span id="watchStatus" class="muted">Apagado · requiere panel abierto</span></div><section aria-label="Mi selección"><div class="line"><strong id="roomTitle">Mis 6 activos</strong><span id="roomCount" class="muted">Hasta 12 activos</span></div>
 <p class="muted">Empieza con 6 activos. Solo «Añadir» aumenta la selección; «Reemplazar» conserva el número. Velas de 1 min · seguimiento simulado de 5 min. Se actualiza mientras el panel está abierto.</p>
 <div class="line"><button id="importTabs">Revisar gráficos de Deriv</button><button id="editRoom" aria-expanded="false">Editar activos</button></div>
 <button id="createDerivTab" hidden>Crear nueva pestaña de Chrome (solicitud explícita)</button><div id="syncReference" aria-label="Referencia de Deriv"></div><div id="roomMessage" role="status" class="muted" aria-live="polite"></div>
@@ -10,11 +10,14 @@
 <div hidden><select id="market"><option value="all">Todos</option></select><select id="horizon"><option value="5">5 minutos</option></select><input type="checkbox" id="auto"></div>
 <div id="alertStatus" role="status" aria-live="polite" class="muted"></div><span id="count" class="muted">Esperando conexión</span>
 <div id="results" class="room-grid"></div></section>
-<section><strong>Alternativas para revisar</strong><p class="muted">Escaneo de hasta 12 activos, incluidos los seleccionados. Se sugieren señales vigentes con puntuación ≥60, al menos 10 puntos sobre el mínimo vigente de tu sala y el filtro retrospectivo auditado. No demuestra rentabilidad. El reemplazo siempre requiere tu elección.</p><div id="suggestions"></div></section>
+<section><strong>Mejores condiciones técnicas observadas</strong><details><summary>Cómo se eligen las alternativas (sistema original)</summary><p class="muted">Alternativas del sistema original, no señales principales del lector; requieren aprobación. Escaneo de hasta 12 activos, incluidos los seleccionados. Se sugieren señales vigentes con puntuación ≥60, al menos 10 puntos sobre el mínimo vigente de tu sala y el filtro retrospectivo auditado. No demuestra rentabilidad. El reemplazo siempre requiere tu elección.</p></details><div id="suggestions"></div></section>
+<details id="advanced" class="advanced-panel"><summary>Avanzado: gráficos, métodos, indicadores y estadísticas</summary>
+<label>Método de señal principal<select id="primaryMethod"><option value="adaptive">Lector adaptativo v1.0.0</option><option value="original">Sistema original v1.9</option></select></label>
+<p class="muted">Cambiar este selector solo cambia la señal que ves, nunca relaja reglas ni cambia la recopilación o los registros anteriores. No se usa una señal como sustituta de la otra. Las primeras 151 señales originales: 75 aciertos y 76 fallos; sin ventaja demostrada.</p>
 <section aria-label="Lector inteligente de gráficos"><details><summary><strong>Lector inteligente de gráficos · hipótesis v1.0.0</strong></summary>
 <p class="muted">OHLC oficial cerrado: 15m contexto · 5m estructura · 1m confirmación. Horizonte simulado de seguimiento: 5 min (distinto de la temporalidad). Estrategias candidatas fijadas por metadatos, nunca elegidas por la mejor tasa histórica. Familias desconocidas: ESPERAR.</p>
 <p class="notice">Sin ventaja demostrada. El tramo histórico final del 30% se evalúa sin ajustar reglas a sus resultados; no demuestra validación independiente del mundo real. Prospectivo posterior separado. Comparaciones múltiples y muestras correlacionadas: Wilson no corrige esos sesgos.</p>
-<label class="check"><input type="checkbox" id="readerEnable"> Recopilar evidencia futura del lector y original pareado (sin operaciones)</label><button id="readerExport">Exportar lector y evaluación CSV</button><div id="readerStatus" role="status" class="muted"></div><div id="readerCards" class="room-grid"></div>
+<label class="check"><input type="checkbox" id="readerEnable"> Recopilar evidencia futura del lector y original pareado (sin operaciones)</label><button id="readerExport">Exportar lector y evaluación CSV</button><div id="readerStatus" role="status" class="muted"></div><div id="readerAudit"></div><div id="readerCards" class="reader-diagnostics"></div>
 </details></section>
 <section aria-label="Comparador de estrategias"><details><summary><strong>Comparador de estrategias · experimental</strong></summary>
 <p class="muted">Resultados retrospectivos y prospectivos separados. Sin ventaja demostrada. Wilson 95% no corrige múltiples comparaciones entre activos y duraciones ni garantiza independencia. No se elige una duración ganadora ni se cambian indicadores.</p>
@@ -23,14 +26,14 @@
 <p class="muted">Entrada nueva por tick observado tras la señal. Ticks: eventos posteriores en flujo continuo, incluso si repiten precio o segundo. Tiempo: último tick ≤ vencimiento, antigüedad máxima 15 s. Máximo tres flujos; no se aceptan entradas del mismo activo durante 10 min para evitar muestras solapadas. Pausar impide entradas nuevas, no cancela las ya iniciadas.</p>
 <button id="cmpTicks">Consultar ventana histórica de ticks</button><button id="cmpExport">Exportar CSV: prospectivo y retrospectivo visible</button><div id="cmpStatus" role="status" class="muted"></div><div id="cmpResults"></div>
 </details></section>
-<section><strong>Seguimiento prospectivo · sin operaciones</strong>
+<section><strong>Seguimiento prospectivo del sistema original</strong>
 <div class="muted">Cuando hay SUBE (Rise) o BAJA (Fall), se solicita una cotización actual de la API y se guarda como precio de referencia observado (no ejecutable). No se reutiliza el cierre anterior como precio de entrada. El resultado se comprueba con un tick del historial no posterior al vencimiento. El seguimiento es experimental, diferente de un contrato real: no verifica pagos, barreras ni contratos disponibles. Mantén el panel abierto para el monitoreo automático; la extensión intenta reconectar si el WebSocket se corta.</div>
-<div class="line"><button id="watch" disabled>Activar monitoreo cada minuto</button><span id="watchStatus" class="muted">Apagado · requiere panel abierto</span></div>
+
 <div class="line"><strong id="forwardCount">0 pendientes · 0 resueltas</strong></div>
 <div id="forwardInfo" class="muted" role="status">Sin escaneo todavía.</div>
 <pre id="forwardRecent">Todavía no hay señales prospectivas.</pre>
 <div class="line"><button id="settleForward">Evaluar señales vencidas</button><button id="exportForward">Exportar seguimiento CSV (incluso vacío)</button></div>
 </section>
 <section><strong>Registro</strong><pre id="log">Esperando conexión.</pre><div class="line"><button id="export">Exportar resumen CSV</button><button id="tradesExport">Exportar señales CSV</button></div></section>
-<footer>API pública de Deriv · Datos de mercado sin autenticación. No se crean ni ejecutan órdenes. Revisa disponibilidad, pagos y restricciones en Deriv antes de cualquier decisión.</footer>
-<script src="indicators.js"></script><script src="forward.js"></script><script src="room.js"></script><script src="comparator.js"></script><script src="adaptive.js"></script><script src="adaptive-follow.js"></script><script src="panel.js"></script><script src="room-ui.js"></script><script src="comparator-ui.js"></script><script src="adaptive-ui.js"></script></body></html>
+</details><footer>API pública de Deriv · Datos de mercado sin autenticación. No se crean ni ejecutan órdenes. Revisa disponibilidad, pagos y restricciones en Deriv antes de cualquier decisión.</footer>
+<script src="indicators.js"></script><script src="forward.js"></script><script src="room.js"></script><script src="comparator.js"></script><script src="adaptive.js"></script><script src="adaptive-follow.js"></script><script src="simple-reader.js"></script><script src="panel.js"></script><script src="room-ui.js"></script><script src="comparator-ui.js"></script><script src="adaptive-ui.js"></script></body></html>

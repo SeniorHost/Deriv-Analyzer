@@ -9,7 +9,7 @@ const http=require('node:http');
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  const server=http.createServer(async(req,res)=>{
   const name=req.url.split('?')[0];
-  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
+  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js','/simple-reader.js'].includes(name)){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');
   try{res.end(await fs.readFile(path.resolve(__dirname,'..'+name)));}catch{res.writeHead(500);res.end();}
  });
@@ -39,7 +39,7 @@ const http=require('node:http');
   assert.equal(await page.title(),'Mi sala de trading · Deriv Analyzer');
   assert.equal(await page.locator('#scan').isEnabled(),false);
   await page.click('#connect');await page.waitForFunction(()=>document.querySelector('#status').textContent==='Conectada');
-  assert.match(await page.locator('#log').innerText(),/Hora Deriv sincronizada/);
+  assert.match(await page.locator('#log').textContent(),/Hora Deriv sincronizada/);
   await page.waitForFunction(()=>document.querySelector('#count').textContent.includes('Finalizado'),{},{timeout:15000});
   assert.match(await page.locator('#count').innerText(),/12\/12 · 0 errores/);
   assert.equal(await page.locator('#results .room-card').count(),6);assert.equal(historyCalls,36);
@@ -50,9 +50,39 @@ const http=require('node:http');
    const stored=await chrome.storage.local.get('deriv_analyzer_forward_v16');
    if(!stored.deriv_analyzer_forward_v16?.some(r=>r.horizon===1&&r.status==='PENDIENTE'))throw new Error('Prospective entry was not persisted');
   });
+  assert.equal(await page.locator('#advanced').getAttribute('open'),null);
+  assert.equal(await page.locator('article.room-card').count(),6);
+  assert.match(await page.locator('#results').innerText(),/Tendencia observada/);
+  assert.match(await page.locator('#results').innerText(),/Señal principal: Lector adaptativo/);
+  assert.match(await page.locator('#results').innerText(),/SIN CONFIRMACIÓN/);
+  assert.equal(await page.locator('#log').isVisible(),false);
+  assert.equal(await page.locator('#readerCards').isVisible(),false);
+  assert.equal(await page.locator('#results .signal-time').count(),0);
+  assert.doesNotMatch(await page.locator('#results').innerText(),/Wilson|Retrospectivo/);
+  if(process.env.SIMPLE_SCREENSHOT)await page.screenshot({path:process.env.SIMPLE_SCREENSHOT,fullPage:true});
+  await page.evaluate(()=>{
+   globalThis.__realReaderView=ADAPT_UI.view;globalThis.__watchWasOn=watchOn;if(watchOn)stopWatch();globalThis.__testRow=results.find(r=>r.symbol===ROOM_UI.selected[0]);globalThis.__oldRow={direction:__testRow.direction,lastTime:__testRow.lastTime,emittedAt:__testRow.emittedAt};
+   const at=serverNow();__testRow.direction='BAJA';__testRow.lastTime=at-60;__testRow.emittedAt=at;
+   globalThis.__presentationFixture={reading:{sourceCloseAt:at,emittedAt:serverNow(),expiresAt:at+60,direction:'ESPERAR'},observed:{sourceCloseAt:at,trend:'ALCISTA'}};
+   ADAPT_UI.view=code=>code===__testRow.symbol?__presentationFixture:__realReaderView(code);ROOM_UI.render(results);
+  });
+  assert.match(await page.locator('#results .room-card').first().innerText(),/Tendencia observada: ALCISTA/);
+  assert.match(await page.locator('#results .room-card').first().innerText(),/SIN CONFIRMACIÓN/);
+  assert.match(await page.locator('#results .room-card').first().innerText(),/Métodos en desacuerdo/);
+  await page.locator('#advanced > summary').click();
   await page.locator('section[aria-label="Lector inteligente de gráficos"] > details > summary').click();
-  await page.waitForFunction(()=>document.querySelectorAll('#readerCards .room-card').length===6);
+  await page.waitForFunction(()=>document.querySelectorAll('#readerCards .reader-detail').length===6);
   assert.equal(await page.locator('#readerEnable').isChecked(),false);
+  await page.selectOption('#primaryMethod','original');
+  assert.match(await page.locator('#results').innerText(),/Señal principal: Sistema original/);
+  assert.match(await page.locator('#results .room-card').first().innerText(),/BAJA/);
+  await page.selectOption('#primaryMethod','adaptive');
+  await page.evaluate(()=>{__presentationFixture.reading.direction='SUBE';ROOM_UI.render(results);});
+  assert.equal(await page.locator('#results .room-card').first().locator('.signal-time').count(),1);
+  await page.evaluate(()=>{__presentationFixture.reading.expiresAt=serverNow()-1;ROOM_UI.render(results);});
+  assert.equal(await page.locator('#results .room-card').first().locator('.signal-time').count(),0);
+  await page.evaluate(()=>{ADAPT_UI.view=__realReaderView;Object.assign(__testRow,__oldRow);ROOM_UI.render(results);if(__watchWasOn)toggleWatch();});
+  assert.equal(await page.locator('article.room-card').count(),6);
   assert.match(await page.locator('#readerCards').innerText(),/horizonte simulado 5 min/);
   await page.locator('#readerCards details').first().locator('summary').click();
   assert.match(await page.locator('#readerCards').innerText(),/Sin ventaja demostrada/);
@@ -102,6 +132,9 @@ const http=require('node:http');
   // Reload checks selection and records using a persistent Chrome-storage mock.
   await page.reload();await page.waitForFunction(()=>document.querySelector('#forwardCount').textContent.includes('pendientes'));
   await page.waitForFunction(()=>document.querySelectorAll('#results .room-card').length===6);
+  assert.equal(await page.locator('#primaryMethod').inputValue(),'adaptive');
+  assert.equal(await page.locator('#advanced').getAttribute('open'),null);
+  assert.equal(await page.locator('article.room-card').count(),6);
   assert.deepEqual(errors,[]);assert.equal(sent.some(m=>m.buy||m.sell||m.proposal||m.authorize),false);
   console.log('Browser smoke PASS: actual DOM, public-API mock, scan, prospective entry with Web Lock, CSV, reload; no page errors.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));await fs.rm(output,{recursive:true,force:true});}

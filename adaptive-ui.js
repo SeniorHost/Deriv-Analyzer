@@ -12,10 +12,12 @@ const ADAPT_UI=(()=>{
  function summary(records){const s=COMPARATOR.stats(records);return `${s.win} aciertos / ${s.lose} fallos / ${s.tie} empates · n=${s.n} (${s.decisive} decisivos) · tasa observada ${s.rate===null?'sin datos':s.rate.toFixed(1)+'%'} · Wilson 95% ${s.low===null?'sin datos':s.low.toFixed(1)+'–'+s.high.toFixed(1)+'%'} · ${s.evidence} · Sin ventaja demostrada`;}
  function paragraph(parent,text){const p=document.createElement('p');p.className='muted';p.textContent=text;parent.append(p);}
  function render(){
+  if(typeof SIMPLE_READER!=='undefined')ROOM_UI.render(results);
   const area=$('readerCards'),expanded=new Set([...area.querySelectorAll('details[open]')].map(d=>d.dataset.symbol));area.replaceChildren();let now=null;try{now=serverNow();}catch{}
+  if(typeof SIMPLE_READER!=='undefined'){const area=$('readerAudit');area.replaceChildren();const reports=ROOM_UI.selected.map(code=>cache.get(code)?.diagnostics).filter(Boolean);paragraph(area,'Diagnóstico descriptivo del tramo reservado, sin modificar reglas v1.0.0; condiciones no exclusivas, sus conteos no se suman como muestras independientes.');for(const [family,f] of Object.entries(SIMPLE_READER.families(reports)))paragraph(area,`${family}: lector ${f.signals}/${f.opportunities} cierres, original ${f.originalSignals}/${f.opportunities}; activos correlacionados.`);for(const r of reports){const top=Object.entries(r.blocked).sort((a,b)=>b[1]-a[1]).slice(0,8);paragraph(area,`${r.symbol} · ${r.family} · lector ${r.signals}/${r.opportunities}, original ${r.originalSignals}/${r.opportunities} cierres. Bloqueos observados: ${top.map(([reason,n])=>reason+' ('+n+')').join('; ')||'ninguno en las observaciones estudiadas'}.`);}if(!reports.length)paragraph(area,'Diagnóstico pendiente: espera la evaluación cooperativa del historial.');}
   for(const code of ROOM_UI.selected){
-   const item=symbols.find(s=>s.symbol===code),data=cache.get(code),r=data?.reading,box=document.createElement('article');box.className='room-card';const title=document.createElement('strong');title.textContent=item?.display_name||code;box.append(title);
-   const current=r&&now!==null&&now>=r.emittedAt&&now<r.expiresAt,dir=current?r.direction:'ESPERAR';const badge=document.createElement('div');badge.className='room-direction '+(dir==='SUBE'?'up':dir==='BAJA'?'down':'wait');badge.textContent=dir==='SUBE'?'RISE':dir==='BAJA'?'FALL':'ESPERAR';box.append(badge);
+   const item=symbols.find(s=>s.symbol===code),data=cache.get(code),r=data?.reading,box=document.createElement('div');box.className='reader-detail';const title=document.createElement('strong');title.textContent=item?.display_name||code;box.append(title);
+   const current=r&&now!==null&&now>=r.emittedAt&&now<r.expiresAt;
    paragraph(box,r?`${r.family} · ${r.strategy}@${r.version} · horizonte simulado 5 min`:'Esperando metadatos y velas cerradas');
    paragraph(box,r?`${r.context} · ${r.structure}. Emisión ${new Date(r.emittedAt*1000).toLocaleTimeString()} · ${current?'vence '+new Date(r.expiresAt*1000).toLocaleTimeString():'caducada o sin hora fiable'}. ${r.explanation}`:'No se interpreta el dibujo ni el DOM de Deriv: solo OHLC oficial.');
    paragraph(box,'Hipótesis experimental · evidencia insuficiente para afirmar utilidad predictiva. Puntuación no equivale a probabilidad.');
@@ -28,10 +30,10 @@ const ADAPT_UI=(()=>{
    box.append(details);const link=document.createElement('button');link.textContent='Ir a Deriv (sin cambiar gráficos)';link.addEventListener('click',()=>chrome.runtime.sendMessage({type:'OPEN_DERIV_ASSET',symbol:code},res=>note(chrome.runtime.lastError?.message||res?.message||res?.error||'Usa la navegación manual de la sala.')));box.append(link);area.append(box);
   }
  }
- async function drain(){if(worker)return;worker=true;try{while(jobs.size&&!disposed){const [code,job]=jobs.entries().next().value;jobs.delete(code);try{const benchmark=await ADAPTIVE.benchmark(job.item,job.c,job.t,()=>new Promise(resolve=>setTimeout(resolve,0)));const latest=cache.get(code);if(latest){latest.benchmark=benchmark;latest.benchAt=job.now;}render();}catch(e){note('Evaluación no disponible: '+e.message);}}}finally{worker=false;}}
+ async function drain(){if(worker)return;worker=true;try{while(jobs.size&&!disposed){const [code,job]=jobs.entries().next().value;jobs.delete(code);try{const yieldControl=()=>new Promise(resolve=>setTimeout(resolve,0)),benchmark=await ADAPTIVE.benchmark(job.item,job.c,job.t,yieldControl),diagnostics=typeof SIMPLE_READER==='undefined'?null:await SIMPLE_READER.audit(job.item,job.c,job.t,yieldControl);const latest=cache.get(code);if(latest){latest.benchmark=benchmark;latest.benchAt=job.now;latest.diagnostics=diagnostics;}render();}catch(e){note('Evaluación no disponible: '+e.message);}}}finally{worker=false;}}
  function onHistory(item,c,t){
   const now=closedThrough(),original=TA.signal(c,t,c.length-1),reading=ADAPTIVE.analyze(item,c,now,original),old=cache.get(item.symbol);reading.emittedAt=serverNow();
-  cache.set(item.symbol,{reading,original,benchmark:old?.benchmark,benchAt:old?.benchAt});if(cache.size>12)cache.delete(cache.keys().next().value);
+  cache.set(item.symbol,{reading,original,observed:typeof SIMPLE_READER==='undefined'?null:SIMPLE_READER.observe(c,now),diagnostics:old?.diagnostics,benchmark:old?.benchmark,benchAt:old?.benchAt});if(cache.size>12)cache.delete(cache.keys().next().value);
   if(ROOM_UI.selected.includes(item.symbol)&&(!old?.benchAt||now-old.benchAt>=600)){jobs.set(item.symbol,{item,c,t,now});void drain();}
   render();void signal(reading,original).catch(e=>note(e.message));
  }
@@ -57,5 +59,5 @@ const ADAPT_UI=(()=>{
   const url=URL.createObjectURL(new Blob(['symbol,family,strategy,rule_version,source,horizon_minutes,entry_delay_seconds,direction,signal_time,entry_time,entry_price,target_time,exit_time,exit_price,result,reason\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='deriv-lector-adaptativo.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
  });
  function refresh(){if(disposed)return;let now=null;try{now=serverNow();}catch{}const signature=ROOM_UI.selected.join('|')+'|'+[...cache.values()].map(d=>now!==null&&now<d.reading.expiresAt).join();if(signature!==lastSignature){lastSignature=signature;render();}setTimeout(refresh,1000);}setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;jobs.clear();});
- return {ready,onHistory,signal,render};
+ return {ready,onHistory,signal,render,view(code){const d=cache.get(code);return d?structuredClone({reading:d.reading,original:d.original,observed:d.observed}):null;}};
 })();

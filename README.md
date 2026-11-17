@@ -1,5 +1,17 @@
 # Deriv Analyzer v1.9 — estabilidad de conexión y hora de Deriv
 
+## Interfaz sencilla — feature/simple-chart-reader
+
+La pantalla principal contiene una sola tarjeta por activo seleccionado: tendencia observada ALCISTA/BAJISTA/LATERAL, estado SUBE/BAJA/SIN CONFIRMACIÓN, productor explícito, velas de un minuto y evaluación de cinco minutos. La hora de emisión y vigencia solo se muestran con señal vigente del método elegido. La tendencia se obtiene de la diferencia entre el último y primero de cuatro cierres completos de 5m, la misma lectura direccional de ese marco; no modifica ni sustituye ninguna confirmación. Sin datos recientes se declara así, en vez de inventar una tendencia lateral.
+
+Por defecto se muestra el lector adaptativo. En «Avanzado» puedes elegir explícitamente el sistema original; esa preferencia se guarda separada de la selección y los registros. No hay fallback al otro método si el elegido no confirma. «Métodos en desacuerdo» identifica los dos estados sin crear una señal combinada. Las condiciones de confirmación v1.0.0 y los indicadores originales son idénticos a `5d25b05`.
+
+«Mejores condiciones técnicas observadas» conserva las alternativas del sistema original con aprobación manual, claramente identificadas. «Avanzado» está plegado por defecto e incluye controles, indicadores, diagnósticos por familia/activo, resultados retrospectivos/prospectivos, comparador, registros y todos los CSV. Los detalles del lector son listas de diagnóstico, no otra colección de tarjetas.
+
+El diagnóstico cuenta frecuencia de señales y condiciones ausentes en observaciones no confirmadas sobre el mismo tramo histórico reservado. Los motivos son no exclusivos: sus conteos no se suman como muestras independientes ni prueban causalmente cuál filtro debe retirarse. No se ajusta ninguna regla para elevar la frecuencia. Los resultados de una instantánea pública y sus límites se documentan en AUDIT.md; no hay evidencia de mejora predictiva.
+
+Validación ampliada: 125 pruebas, incluidas las 112 anteriores, y prueba de navegador para tendencia sin confirmación, método principal, desacuerdo, señal vigente/caducada, estadísticas ocultas, una sola colección de seis tarjetas, preferencias, CSV y seguimiento conservados.
+
 ## Lector inteligente de gráficos (v1.0.0 experimental)
 
 La rama `feature/adaptive-chart-reader` añade un lector OHLC independiente, sin sustituir señales originales ni el comparador. Abre su sección para consultar las seis tarjetas seleccionadas (hasta doce), sus explicaciones y detalles de evaluación. No lee la pantalla de Deriv ni opera sobre sus botones.

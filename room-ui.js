@@ -44,22 +44,35 @@ const ROOM_UI=(()=>{
  });
  function render(rows){
   let now=null;try{now=serverNow();}catch{}
+  if(typeof SIMPLE_READER!=='undefined')$('roomTitle').textContent=`Mis ${selected===null?6:selected.length} activos`;
   $('roomCount').textContent=`${(selected||[]).length}/12 activos`;
   const container=$('results');container.replaceChildren();
   const notices=[];
   for(const code of selected||[]){
    const r=rows.find(r=>r.symbol===code),card=document.createElement('article');card.className='room-card';
    const title=document.createElement('strong');title.textContent=r?.name||symbols.find(s=>s.symbol===code)?.display_name||code;card.append(title);
+   if(typeof SIMPLE_READER!=='undefined'){
+    const view=typeof ADAPT_UI==='undefined'?null:ADAPT_UI.view(code),method=$('primaryMethod').value||'adaptive',m=SIMPLE_READER.model(r,view,now,method);
+    const trend=document.createElement('p');trend.className='observed-trend';trend.textContent='Tendencia observada: '+(m.trend||'SIN DATOS RECIENTES');card.append(trend);
+    const status=document.createElement('div');status.className='room-direction '+(m.direction==='SUBE'?'up':m.direction==='BAJA'?'down':'wait');status.textContent=m.label;card.append(status);
+    const source=document.createElement('p');source.className='signal-source';source.textContent='Señal principal: '+m.source;card.append(source);
+    const config=document.createElement('p');config.className='muted';config.textContent='Velas: 1 minuto · Evaluación: 5 minutos';card.append(config);
+    if(m.emittedAt!==null){const time=document.createElement('p');time.className='signal-time muted';time.textContent=`Emitida ${new Date(m.emittedAt*1000).toLocaleTimeString()} · vigente hasta ${new Date(m.expiresAt*1000).toLocaleTimeString()}`;card.append(time);}
+    const why=document.createElement('p');why.className=m.disagreement?'method-disagreement':'simple-reason';why.textContent=m.reason;card.append(why);
+    const go=button('Ir a Deriv',()=>open(code));go.setAttribute('aria-label','Ir a Deriv sin cambiar gráficos');card.append(go);container.append(card);
+    const id=m.source+'|'+(r?.lastTime??'');if(m.direction!=='ESPERAR'&&!seen.includes(code+'|'+id)){seen.push(code+'|'+id);notices.push(`${title.textContent}: ${m.label} (${m.source})`);}
+   }else{
    const a=r&&now!==null?ROOM.alert(r,now):null;
    const status=document.createElement('div');status.className='room-direction '+(a?.active?(r.direction==='SUBE'?'up':'down'):'wait');status.textContent=a?.active?(r.direction==='SUBE'?'RISE':'FALL'):'ESPERAR';card.append(status);
    const info=document.createElement('p');info.className='muted';
    info.textContent=!r?(apiReady&&!symbols.some(s=>s.symbol===code)?'Activo no disponible en el catálogo actual; reemplázalo al editar.':'Esperando análisis'):r.error?'Sin datos: '+r.error:now===null?'Sin conexión u hora fiable; alerta suspendida':`Señal: ${new Date(a.at*1000).toLocaleTimeString()} · ${a.active?'Vigente hasta '+new Date(a.until*1000).toLocaleTimeString():['SUBE','BAJA'].includes(r.direction)?'Caducada':'Sin señal direccional'} · Puntuación técnica ${r.score}/100 (no probabilidad)`;
    card.append(info,button('Ir a Deriv (sin cambiar gráficos)',()=>open(code)));container.append(card);
    if(a?.active&&!seen.includes(a.id)){seen.push(a.id);notices.push(`${title.textContent}: ${status.textContent}`);}
+   }
   }
   if(!selected?.length){const p=document.createElement('p');p.className='muted';p.textContent=selected===null?'Conecta para preparar seis activos recomendados.':'Tu sala está vacía. Usa Agregar activo manualmente.';container.append(p);}
   if(notices.length){$('alertStatus').textContent='Nuevas alertas técnicas: '+notices.join(' · ');seen=seen.slice(-240);queue=queue.catch(()=>{}).then(()=>save()).catch(e=>message('No se pudo guardar el historial de alertas: '+e.message));}
-  else {const text=rows.some(r=>(selected||[]).includes(r.symbol)&&now!==null&&ROOM.alert(r,now).active)?'Alertas vigentes · sin novedades para esta vela.':'Sin alertas técnicas vigentes.';if($('alertStatus').textContent!==text)$('alertStatus').textContent=text;}
+  else {const text=rows.some(r=>(selected||[]).includes(r.symbol)&&now!==null&&(typeof SIMPLE_READER==='undefined'?ROOM.alert(r,now).active:SIMPLE_READER.model(r,typeof ADAPT_UI==='undefined'?null:ADAPT_UI.view(r.symbol),now,$('primaryMethod').value||'adaptive').direction!=='ESPERAR'))?'Alertas vigentes · sin novedades para esta vela.':'Sin alertas técnicas vigentes.';if($('alertStatus').textContent!==text)$('alertStatus').textContent=text;}
   $('suggestions').replaceChildren();
   const alternatives=now===null?[]:ROOM.suggestions(rows,selected||[],now);
   for(const r of alternatives){
@@ -91,7 +104,12 @@ const ROOM_UI=(()=>{
   });});approve.disabled=!(selected||[]).length;
   reference.append(old,next,approve);
  }));
- function refresh(){if(disposed)return;const next=results.map(r=>{try{return ROOM.alert(r,serverNow()).active;}catch{return false;}}).join('|');if(next!==signature){signature=next;render(results);}setTimeout(refresh,1000);}
+ if(typeof SIMPLE_READER!=='undefined'){
+  let preferenceWrite=Promise.resolve(),methodChanged=false;
+  void chrome.storage.local.get('deriv_analyzer_primary_method_v1').then(value=>{const method=value.deriv_analyzer_primary_method_v1;if(!methodChanged&&['original','adaptive'].includes(method))$('primaryMethod').value=method;render(results);}).catch(e=>message('No se pudo restaurar el método: '+e.message));
+  $('primaryMethod').addEventListener('change',()=>{methodChanged=true;const method=$('primaryMethod').value;if(!['original','adaptive'].includes(method))return;render(results);preferenceWrite=preferenceWrite.catch(()=>{}).then(()=>chrome.storage.local.set({deriv_analyzer_primary_method_v1:method})).catch(e=>message('Método solo en memoria: '+e.message));});
+ }
+ function refresh(){if(disposed)return;const next=results.map(r=>{try{if(typeof SIMPLE_READER!=='undefined')return JSON.stringify(SIMPLE_READER.model(r,typeof ADAPT_UI==='undefined'?null:ADAPT_UI.view(r.symbol),serverNow(),$('primaryMethod').value||'adaptive'));return ROOM.alert(r,serverNow()).active;}catch{return false;}}).join('|');if(next!==signature){signature=next;render(results);}setTimeout(refresh,1000);}
  setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;});
  return {ready,connected,render,change,get selected(){return [...(selected||[])];}};
 })();

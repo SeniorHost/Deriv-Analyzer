@@ -174,3 +174,46 @@ Rendimiento: se reutilizan los OHLC/cache y la conexión públicos existentes, s
 - Sintaxis, YAML, `git diff --check` y ejecución completa se comprueban antes del único commit/push. Workflow ampliado para push a la rama nueva y PR contra `feature/duration-comparator`; estado remoto sujeto al acceso a la API GitHub, previamente Forbidden.
 
 Pendiente: Chrome instalado autorizado, sesiones prospectivas reales prolongadas, frecuencia y resultados suficientes por regla y activo, costes/pagos/condiciones contractuales y validación externa independiente. No se ha demostrado mejora predictiva. Los pivotes y zonas son definiciones algorítmicas, no una interpretación visual infalible ni aprendizaje automático. No se ejecutan contratos ni se inspeccionan credenciales, botones o estado interno de cuentas.
+
+
+## Simplificación del lector — feature/simple-chart-reader, base 5d25b05
+
+Cambio de presentación y diagnóstico, no de reglas. `adaptive.js`, `adaptive-follow.js` e `indicators.js` se mantienen byte a byte idénticos a la base, comprobado por una prueba contra los blobs Git de `5d25b05`. No se relajan filtros, no se cambia v1.0.0, no se migran resultados históricos y no se ajustan umbrales a los resultados. Las reglas futuras deberán tener otra versión experimental.
+
+### Una sola pantalla principal
+
+«Mis N activos» respeta los seis iniciales, el máximo doce y la selección vacía intencionada. Una sola colección `article.room-card` contiene nombre, tendencia observada, señal del productor elegido, velas 1m y horizonte 5m, frase sencilla y acceso manual a Deriv. La emisión/vigencia solo existe en la tarjeta con señal vigente. La metainformación de emisión añadida al resultado original no participa en su cálculo ni seguimiento.
+
+La tendencia es una lectura descriptiva de cuatro cierres completos de 5m (diferencia último/primero), separada de las confirmaciones. Puede ser ALCISTA aunque falten patrón, alineación, horario o reglas verificadas para confirmar. No se inventa LATERAL cuando faltan datos o reloj fiable. Las explicaciones traducen las causas en frases breves; los valores y motivos técnicos completos siguen accesibles.
+
+Método principal predeterminado: lector adaptativo. Selección explícita del original en Avanzado, persistida en `deriv_analyzer_primary_method_v1`, sin cambiar qué fuentes recopilan prospectivos. No hay fallback ni mezcla de señales. Desacuerdo significa que los estados vigentes difieren, incluyendo que uno no confirme: se nombran ambos. Una preferencia restaurada tarde no sobrescribe una elección explícita del usuario. Alertas de pantalla y deduplicación identifican al productor visible; los registros anteriores conservan sus claves y resultados.
+
+Sección secundaria de alternativas del original, etiquetada y con aprobación manual intacta. Avanzado plegado por defecto contiene lector detallado como lista (sin tarjetas duplicadas), comparador, selección del método principal, seguimiento original, logs, estadísticas y todos los CSV/controles anteriores. Pausar/activar monitoreo permanece accesible en la principal. No se amplían permisos, no se inspeccionan gráficos internos ni se ejecutan operaciones.
+
+### Auditoría de la baja frecuencia
+
+Nuevo módulo independiente `simple-reader.js`: modelos de presentación, tendencia descriptiva y contadores de diagnóstico. Se reutiliza exactamente el motor v1.0.0 sobre el mismo tramo reservado (último 30%, calentamiento 240, sin estado actual de mercado abierto/cerrado). Las oportunidades y frecuencias son cierres evaluados, no operaciones. El benchmark original y por reglas conserva sus resultados fuera del tramo inicial; este uso de histórico conocido no constituye validación externa independiente.
+
+Se cuentan por activo y familia: oportunidades, señales lector/original y motivos presentes cuando no hay confirmación. Se incluyen contradicciones reales del motor y condiciones diagnósticas ausentes de sus candidatas. No son pruebas contrafactuales de que retirar un filtro mejore resultados, ni causas mutuamente excluyentes. Las sumas de motivos pueden superar el número de cierres. El cálculo es cooperativo, acotado y como máximo cada diez minutos por activo, sin solicitudes API adicionales. El diagnóstico no alimenta selección de métodos ni confirma señales.
+
+Comprobación reproducida sobre la instantánea pública previamente consultada de 599 velas cerradas por activo, con 174 cierres de evaluación por activo:
+
+| Activo / familia | Frecuencia lector | Frecuencia original | Resultados lector no solapados (aciertos/fallos/empates) | Resultados original no solapados |
+| --- | --- | --- | --- | --- |
+| 1HZ10V / VOLATILITY | 12/174 | 84/174 | n=9: 4/5/0 | n=21: 10/11/0 |
+| RB100 / RANGE_BREAK | 1/174 | 58/174 | n=1: 1/0/0 | n=15: 3/11/1 |
+| frxEURUSD / FOREX | 0/174 | 112/174 | n=0 | n=24: 11/12/1 |
+
+Volatility: tres cuerpos no alineados en 127 observaciones no confirmadas; impulso inferior a ATR en 96; cuerpo menor a 50% del rango en 81; falta de alineación 5m/15m en 64. Range Break: faltan dos cierres fuera del canal en 165; precio alejado de niveles en 89; contradicción temporal en 45. FOREX: horario de estudio ausente en 169, ruptura previa no confirmada en 149, rechazo/envolvente ausente en 126, pivotes 5m direccionales insuficientes en 95. Esos conjuntos se solapan y describen solo esta ventana, no una distribución universal ni resultados futuros.
+
+En particular, el caso favorable de una única muestra de Range Break no permite escogerlo como ganador. Todas las muestras del lector son insuficientes para afirmar utilidad; Wilson sigue disponible únicamente como estadística descriptiva por serie en Avanzado. Ni estos datos ni sus contadores cambian una regla de confirmación.
+
+### Validación
+
+125 pruebas aprobadas en Node.js 20.20.2, cero fallidas/omitidas: 112 previas y trece nuevas de modelo/estados, observación cerrada, no fallback, identificación del productor, desacuerdo, expiración, ausencia de reloj/datos, explicación sencilla, contadores no exclusivos, agregación por familia, ausencia de fuga de disponibilidad presente, invariancia de los archivos de reglas y restauración tardía de preferencias.
+
+La prueba de navegador aprobada verifica Avanzado inicialmente cerrado, estadísticas/logs ocultos, seis tarjetas globales, tendencia alcista con SIN CONFIRMACIÓN, desacuerdo y elección explícita de productor, horas únicamente con señal, caducidad, restauración de preferencia, edición/importación/reemplazo, lector y comparador prospectivos, CSV y persistencia. Los estados visuales dirigidos usan una fixture de presentación, no nuevas reglas ni una estimación de precisión de mercado. No se usan compras, ventas, propuestas o autorización de cuenta.
+
+Se comprueban sintaxis JS/CJS, YAML y `git diff --check` antes del único commit/push. Workflow ampliado para push a `feature/simple-chart-reader` y PR a `feature/adaptive-chart-reader`. El resultado remoto de Actions requiere acceso a la API GitHub, previamente Forbidden, y no se infiere del resultado local.
+
+Limitaciones: los bloqueos medidos son diagnósticos retrospectivos no exclusivos; la familia se atribuye con metadatos actuales verificados, no catálogo histórico versionado. La tendencia no mide fuerza ni probabilidad, y pequeñas diferencias de cierres pueden dar un sesgo direccional sin señal. Continúan pendientes Chrome instalado y prospectivo real prolongado con reglas fijas y validación externa. Sin ventaja financiera demostrada, sin fusiones, releases ni despliegue.
