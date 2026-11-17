@@ -3,10 +3,10 @@
 <div class="notice">Señales técnicas experimentales, no instrucciones de compra. Las primeras 151 señales: 75 aciertos y 76 fallos. No hay ventaja financiera demostrada. La puntuación técnica NO es una probabilidad.</div>
 <section><div class="line"><strong>Conexión oficial</strong><span id="status" class="pill">Desconectado</span></div><div id="detail" class="muted">Sin usuario, clave API ni acceso a tu cuenta.</div><div class="line"><button id="connect">Conectar API</button><button id="test" disabled>Probar 1 activo</button><button id="scan" disabled>Escanear 12</button><button id="cancel" disabled>Cancelar</button></div></section>
 <section aria-label="Mi selección"><div class="line"><strong>Mi sala de trading</strong><span id="roomCount" class="muted">Hasta 12 activos</span></div>
-<p class="muted">Empieza con 6 activos, sin necesidad de abrir pestañas. Velas de 1 min · seguimiento simulado de 5 min. Se actualiza mientras el panel está abierto.</p>
-<div class="line"><button id="importTabs">Importar mis pestañas</button><button id="editRoom" aria-expanded="false">Editar activos</button></div>
-<div id="roomMessage" role="status" class="muted" aria-live="polite"></div>
-<div id="roomEditor" hidden><label>Añadir activo<select id="addAsset" aria-label="Activo para añadir"></select></label><button id="addRoom">Añadir a mi sala</button><div id="selectionEditor"></div></div>
+<p class="muted">Empieza con 6 activos. Solo «Añadir» aumenta la selección; «Reemplazar» conserva el número. Velas de 1 min · seguimiento simulado de 5 min. Se actualiza mientras el panel está abierto.</p>
+<div class="line"><button id="importTabs">Revisar gráficos de Deriv</button><button id="editRoom" aria-expanded="false">Editar activos</button></div>
+<button id="createDerivTab" hidden>Crear nueva pestaña de Chrome (solicitud explícita)</button><div id="syncReference" aria-label="Referencia de Deriv"></div><div id="roomMessage" role="status" class="muted" aria-live="polite"></div>
+<div id="roomEditor" hidden><p class="muted">Los gráficos internos de Deriv no están sincronizados. Si cambias uno allí, reemplázalo aquí manualmente. No se crearán activos nuevos automáticamente.</p><label>Agregar activo manualmente<select id="addAsset" aria-label="Activo para añadir"></select></label><button id="addRoom">Añadir un activo (aumenta la selección)</button><div id="selectionEditor"></div></div>
 <div hidden><select id="market"><option value="all">Todos</option></select><select id="horizon"><option value="5">5 minutos</option></select><input type="checkbox" id="auto"></div>
 <div id="alertStatus" role="status" aria-live="polite" class="muted"></div><span id="count" class="muted">Esperando conexión</span>
 <div id="results" class="room-grid"></div></section>

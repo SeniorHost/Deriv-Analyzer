@@ -1,6 +1,6 @@
 'use strict';
 const ROOM_UI=(()=>{
- let selected=null,seen=[],usable=false,queue=Promise.resolve(),signature='',disposed=false;
+ let selected=null,seen=[],usable=false,queue=Promise.resolve(),signature='',disposed=false,createSymbol=null;
  const message=text=>{$('roomMessage').textContent=text;};
  const ready=(async()=>{try{
   const value=(await chrome.storage.local.get(ROOM.KEY))[ROOM.KEY];
@@ -31,7 +31,17 @@ const ROOM_UI=(()=>{
    const replace=button('Reemplazar',()=>change(list=>ROOM.change(list,code,target.value)));replace.disabled=!available.length;row.append(replace,button('Quitar',()=>change(list=>list.filter(s=>s!==code))));$('selectionEditor').append(row);
   }
  }
- function open(code){chrome.runtime.sendMessage({type:'OPEN_DERIV_ASSET',symbol:code},res=>message(chrome.runtime.lastError?.message||res?.error||(res?.ok?'Pestaña del activo abierta o activada.':'No se pudo abrir la pestaña.')));}
+ function open(code){
+  createSymbol=null;$('createDerivTab').hidden=true;
+  chrome.runtime.sendMessage({type:'OPEN_DERIV_ASSET',symbol:code},res=>{
+   message(chrome.runtime.lastError?.message||res?.error||res?.message||'No se pudo activar Deriv.');
+   if(res?.ok&&res.needsNewTab){createSymbol=code;$('createDerivTab').hidden=false;}
+  });
+ }
+ $('createDerivTab').addEventListener('click',()=>{
+  if(!createSymbol)return;const symbol=createSymbol;createSymbol=null;$('createDerivTab').hidden=true;
+  chrome.runtime.sendMessage({type:'CREATE_DERIV_TAB',symbol},res=>message(chrome.runtime.lastError?.message||res?.error||res?.message||'No se pudo crear la pestaña.'));
+ });
  function render(rows){
   let now=null;try{now=serverNow();}catch{}
   $('roomCount').textContent=`${(selected||[]).length}/12 activos`;
@@ -44,10 +54,10 @@ const ROOM_UI=(()=>{
    const status=document.createElement('div');status.className='room-direction '+(a?.active?(r.direction==='SUBE'?'up':'down'):'wait');status.textContent=a?.active?(r.direction==='SUBE'?'RISE':'FALL'):'ESPERAR';card.append(status);
    const info=document.createElement('p');info.className='muted';
    info.textContent=!r?(apiReady&&!symbols.some(s=>s.symbol===code)?'Activo no disponible en el catálogo actual; reemplázalo al editar.':'Esperando análisis'):r.error?'Sin datos: '+r.error:now===null?'Sin conexión u hora fiable; alerta suspendida':`Señal: ${new Date(a.at*1000).toLocaleTimeString()} · ${a.active?'Vigente hasta '+new Date(a.until*1000).toLocaleTimeString():['SUBE','BAJA'].includes(r.direction)?'Caducada':'Sin señal direccional'} · Puntuación técnica ${r.score}/100 (no probabilidad)`;
-   card.append(info,button('Abrir / activar pestaña',()=>open(code)));container.append(card);
+   card.append(info,button('Ir a Deriv (sin cambiar gráficos)',()=>open(code)));container.append(card);
    if(a?.active&&!seen.includes(a.id)){seen.push(a.id);notices.push(`${title.textContent}: ${status.textContent}`);}
   }
-  if(!selected?.length){const p=document.createElement('p');p.className='muted';p.textContent=selected===null?'Conecta para preparar seis activos recomendados.':'Tu sala está vacía. Añade activos o importa tus pestañas.';container.append(p);}
+  if(!selected?.length){const p=document.createElement('p');p.className='muted';p.textContent=selected===null?'Conecta para preparar seis activos recomendados.':'Tu sala está vacía. Usa Agregar activo manualmente.';container.append(p);}
   if(notices.length){$('alertStatus').textContent='Nuevas alertas técnicas: '+notices.join(' · ');seen=seen.slice(-240);queue=queue.catch(()=>{}).then(()=>save()).catch(e=>message('No se pudo guardar el historial de alertas: '+e.message));}
   else {const text=rows.some(r=>(selected||[]).includes(r.symbol)&&now!==null&&ROOM.alert(r,now).active)?'Alertas vigentes · sin novedades para esta vela.':'Sin alertas técnicas vigentes.';if($('alertStatus').textContent!==text)$('alertStatus').textContent=text;}
   $('suggestions').replaceChildren();
@@ -65,15 +75,23 @@ const ROOM_UI=(()=>{
  }
  async function connected(){await ready;if(!usable)return;await queue;if(selected===null){selected=ROOM.defaults(symbols);try{await save();}catch(e){selected=null;message('No se pudo guardar la selección inicial: '+e.message);return;}}editor();render(results);if(!watchOn)toggleWatch();void scan(false);}
  $('editRoom').addEventListener('click',()=>{const editor=$('roomEditor');editor.hidden=!editor.hidden;$('editRoom').setAttribute('aria-expanded',String(!editor.hidden));});
- $('addRoom').addEventListener('click',()=>change(list=>ROOM.change(list,null,$('addAsset').value)));
- $('importTabs').addEventListener('click',()=>chrome.runtime.sendMessage({type:'IMPORT_DERIV_TABS'},res=>{
-  if(chrome.runtime.lastError||!res?.ok)return message(chrome.runtime.lastError?.message||res?.error||'No se pudieron detectar las pestañas.');
-  const imported=(res.symbols||[]).filter(ROOM.valid);
-  if(!imported.length)return message('No se encontraron pestañas de Deriv Trader con símbolo en la URL. Puedes elegir activos sin abrir pestañas.');
-  if(new Set([...(selected||[]),...imported]).size>12)return message('La importación supera 12 activos. Quita alguno antes de importar.');
-  void change(list=>ROOM.selection([...new Set([...list,...imported])]));
+ $('addRoom').addEventListener('click',()=>{const next=$('addAsset').value;void change(list=>ROOM.change(list,null,next));});
+ $('importTabs').addEventListener('click',()=>chrome.runtime.sendMessage({type:'INSPECT_DERIV_VIEWS'},res=>{
+  const reference=$('syncReference');reference.replaceChildren();
+  if(chrome.runtime.lastError||!res?.ok)return message(chrome.runtime.lastError?.message||res?.error||'No se pudieron consultar las vistas de Deriv.');
+  const detected=[...new Set((Array.isArray(res.symbols)?res.symbols:[]).filter(ROOM.valid))].slice(0,100);
+  message('No podemos enumerar ni activar los gráficos internos de Deriv. La selección de la sala no cambió. Solo se consultaron URLs de pestañas de Chrome.');
+  if(!detected.length){reference.textContent='No hay símbolos identificables en las URLs. Usa Editar activos para reemplazar manualmente.';return;}
+  const note=document.createElement('p');note.className='muted';note.textContent='Referencia de URLs (no inventario de gráficos internos): '+detected.join(', ');reference.append(note);
+  const old=select('Activo seleccionado que deseas reemplazar',(selected||[]).map(code=>[code,code]));
+  const next=select('Símbolo detectado para reemplazo manual',detected.map(code=>[code,code]));
+  const approve=button('Confirmar reemplazo manual',()=>{const before=old.value,after=next.value;void change(list=>{
+   if(!symbols.some(s=>s.symbol===after))throw new Error('Conecta y comprueba que el activo está disponible antes de reemplazarlo');
+   return ROOM.change(list,before,after);
+  });});approve.disabled=!(selected||[]).length;
+  reference.append(old,next,approve);
  }));
  function refresh(){if(disposed)return;const next=results.map(r=>{try{return ROOM.alert(r,serverNow()).active;}catch{return false;}}).join('|');if(next!==signature){signature=next;render(results);}setTimeout(refresh,1000);}
  setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;});
- return {ready,connected,render,change,get selected(){return selected||[];}};
+ return {ready,connected,render,change,get selected(){return [...(selected||[])];}};
 })();

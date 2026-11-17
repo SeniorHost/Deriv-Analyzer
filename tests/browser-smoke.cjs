@@ -20,7 +20,7 @@ const http=require('node:http');
   page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
    const storage=JSON.parse(localStorage.getItem('mock-storage')||'{}');
-   globalThis.chrome={storage:{local:{get:async key=>({[key]:storage[key]}),set:async data=>{Object.assign(storage,data);localStorage.setItem('mock-storage',JSON.stringify(storage));}}},runtime:{sendMessage(m,cb){cb?.(m.type==='IMPORT_DERIV_TABS'?{ok:true,symbols:['VOL_11']}:{ok:true});}}};
+   globalThis.__roomMessages=[];globalThis.chrome={storage:{local:{get:async key=>({[key]:storage[key]}),set:async data=>{Object.assign(storage,data);localStorage.setItem('mock-storage',JSON.stringify(storage));}}},runtime:{sendMessage(m,cb){__roomMessages.push(m);cb?.(m.type==='INSPECT_DERIV_VIEWS'?{ok:true,symbols:['VOL_11'],internalChartsSupported:false,scope:'browser-urls-only'}:{ok:true,mode:'deriv-workspace',message:'Deriv activado sin cambiar sus gráficos. Selecciona el gráfico interno manualmente.'});}}};
   });
   let historyCalls=0;
   await page.routeWebSocket('wss://api.derivws.com/**',ws=>{
@@ -51,21 +51,31 @@ const http=require('node:http');
    if(!stored.deriv_analyzer_forward_v16?.some(r=>r.horizon===1&&r.status==='PENDIENTE'))throw new Error('Prospective entry was not persisted');
   });
   await page.click('#editRoom');
-  await page.selectOption('#addAsset','VOL_6');await page.click('#addRoom');
-  await page.waitForFunction(()=>document.querySelector('#roomCount').textContent==='7/12 activos');
   await page.locator('.selection-row select').first().selectOption('VOL_7');
   await page.locator('.selection-row button').first().click();
   await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_7')&&!ROOM_UI.selected.includes('1HZ10V'));
-  await page.click('#importTabs');await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_11'));
-  assert.equal(await page.locator('.room-card').count(),8);
-  await page.locator('.selection-row button').filter({hasText:'Quitar'}).first().click();
+  assert.equal(await page.locator('.room-card').count(),6);
+  await page.click('#importTabs');await page.waitForFunction(()=>document.querySelector('#syncReference').textContent.includes('VOL_11'));
+  assert.equal(await page.locator('.room-card').count(),6);
+  assert.equal(await page.evaluate(()=>ROOM_UI.selected.includes('VOL_11')),false);
+  await page.locator('#syncReference select').first().selectOption('VOL_1');
+  await page.locator('#syncReference select').last().selectOption('VOL_11');
+  await page.getByRole('button',{name:'Confirmar reemplazo manual'}).click();
+  await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_11')&&!ROOM_UI.selected.includes('VOL_1'));
+  assert.equal(await page.locator('.room-card').count(),6);
+  await page.click('#importTabs');assert.equal(await page.locator('.room-card').count(),6);
+  await page.locator('.room-card button').first().click();
+  assert.equal(await page.evaluate(()=>__roomMessages.some(m=>m.type==='CREATE_DERIV_TAB')),false);
+  await page.selectOption('#addAsset','VOL_6');await page.click('#addRoom');
   await page.waitForFunction(()=>ROOM_UI.selected.length===7);
+  await page.locator('.selection-row').filter({hasText:'Volatility 6'}).getByRole('button',{name:'Quitar'}).click();
+  await page.waitForFunction(()=>ROOM_UI.selected.length===6);
   if(process.env.ROOM_SCREENSHOT)await page.screenshot({path:process.env.ROOM_SCREENSHOT,fullPage:true});
   const downloadPromise=page.waitForEvent('download');await page.click('#exportForward');const download=await downloadPromise;
   const file=path.join(output,'forward.csv');await download.saveAs(file);assert.match(await fs.readFile(file,'utf8'),/^symbol,name,recordedAt/);
   // Reload checks selection and records using a persistent Chrome-storage mock.
   await page.reload();await page.waitForFunction(()=>document.querySelector('#forwardCount').textContent.includes('pendientes'));
-  await page.waitForFunction(()=>document.querySelectorAll('.room-card').length===7);
+  await page.waitForFunction(()=>document.querySelectorAll('.room-card').length===6);
   assert.deepEqual(errors,[]);assert.equal(sent.some(m=>m.buy||m.sell||m.proposal||m.authorize),false);
   console.log('Browser smoke PASS: actual DOM, public-API mock, scan, prospective entry with Web Lock, CSV, reload; no page errors.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));await fs.rm(output,{recursive:true,force:true});}

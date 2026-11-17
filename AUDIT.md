@@ -79,3 +79,32 @@ Base: `8634638` de `audit/v1.9-stability`. Se mantiene una sola rama de implemen
 - Workflow ampliado para push a `feature/trading-room` y PR hacia `audit/v1.9-stability` o `main`; mantiene permisos de solo lectura y Node.js 20. El push solicita la ejecución automática. El estado remoto de Actions y la creación del PR dependen del acceso a GitHub, cuya API previamente devolvió `Forbidden`; no se equipara el pase local a una ejecución remota confirmada.
 
 Sigue pendiente la validación como extensión instalada en Chrome autorizado y una sesión prolongada con datos reales. Los mocks de pestañas prueban el contrato de navegación, no la experiencia de una cuenta real de Deriv. No hay fusiones, releases, despliegues ni operaciones financieras.
+
+
+## Corrección de sincronización de gráficos — base d767a98
+
+Se mantiene `feature/trading-room` y se prepara una única actualización para el PR #2. Causa confirmada: la importación anterior hacía unión de símbolos de URLs con la selección. Cambiar una URL y repetir la importación podía conservar el símbolo viejo y añadir el nuevo, pasando de seis a siete. Además, si no había URL coincidente, «Abrir» creaba una pestaña aunque el activo pudiera existir como gráfico interno.
+
+### Investigación y límite técnico
+
+Se consultaron la página pública `https://dtrader.deriv.com/` y el código público `deriv-com/deriv-app`, revisión `580a898d07ffc9f2996b42660b29eab12be1578c`:
+
+- `packages/trader/src/Stores/Modules/Trading/trade-store.ts`, líneas 598–618: lee un símbolo de `window.location.search` y estado `trade_store` de sesión. Una URL no representa un inventario de seis gráficos internos.
+- Mismo archivo, líneas 1951–1973, y `packages/trader/src/Modules/Trading/Containers/trade-chart.tsx`, líneas 135–156: hay estado de layout y callbacks internos entre componentes del gráfico. No se encontró un contrato público compatible para enumerar todos los gráficos internos y activar uno por símbolo desde una extensión.
+- Esto no acredita que el código público coincida exactamente con la interfaz desplegada del usuario. No se accedió a una cuenta, no se inspeccionaron credenciales ni se pulsaron botones financieros. No se implementaron heurísticas de DOM, inyección en stores privados ni asociaciones inventadas con posiciones de gráficos.
+
+### Comportamiento corregido
+
+- «Agregar activo manualmente» aumenta la selección únicamente por clic explícito, hasta doce; el valor se captura al hacer clic para que un doble clic no añada el siguiente elemento del desplegable.
+- «Reemplazar» exige que el activo de origen siga seleccionado, conserva el número y rechaza duplicados. La restauración deduplica por símbolo antes de contar. No se recortan selecciones previas legítimas de siete o más: el usuario puede quitar el activo que considere sobrante.
+- «Revisar gráficos de Deriv» solo muestra una referencia de URLs de pestañas Chrome y declara que los gráficos internos no están sincronizados. Nunca une esa lista con la selección. Se ofrece un reemplazo manual individual y explícito, con validación contra el catálogo.
+- «Ir a Deriv (sin cambiar gráficos)» reutiliza una pestaña con URL coincidente o enfoca una de Deriv existente. No cambia la URL ni cierra o altera gráficos. La respuesta distingue URL coincidente de espacio de trabajo; no afirma haber activado un gráfico interno.
+- Si no hay pestaña identificable, se ofrece una acción separada «Crear nueva pestaña de Chrome». La creación se serializa y vuelve a consultar pestañas para evitar duplicados por doble clic.
+- Manifest V3 conserva exactamente `sidePanel`, `tabs`, `storage` y los permisos de host anteriores; no se añade `scripting` ni content scripts. Las funciones de enfoque de ventanas usan la API estándar sin nuevos permisos.
+- Velas de un minuto, horizonte prospectivo de cinco minutos, indicadores, alertas, almacenamiento prospectivo y CSV no se modifican.
+
+### Validación de la actualización
+
+Se mantienen los 59 casos previos, actualizando la expectativa del caso que antes exigía crear una pestaña adicional cuando ya había Deriv abierto: ahora exige enfoque sin creación. Se agregan doce casos sobre conservación de seis activos, deduplicación, cambio de URL, inspección sin mutación, reemplazo explícito, doble clic, identificación parcial, navegación, creación explícita serializada, URLs pendientes de cargar y permisos MV3. La consulta incluye pestañas pendientes y filtra únicamente el origen exacto de Deriv, sin guardar ni registrar otras URLs.
+
+Resultado de la validación completa: 71 pruebas aprobadas en Node.js 20.20.2, cero fallidas/omitidas; prueba Chromium con API simulada aprobada, sintaxis JS/CJS, YAML y `git diff --check` aprobados. El navegador verifica específicamente seis tarjetas tras reemplazar y revisar URLs, un aumento a siete solo tras «Añadir», vuelta a seis tras «Quitar» y restauración de seis al recargar. No acredita enumeración o activación de los gráficos internos reales: esa integración queda explícitamente no disponible.
