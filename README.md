@@ -1,5 +1,21 @@
 # Deriv Analyzer v1.9 — estabilidad de conexión y hora de Deriv
 
+## Lector inteligente de gráficos (v1.0.0 experimental)
+
+La rama `feature/adaptive-chart-reader` añade un lector OHLC independiente, sin sustituir señales originales ni el comparador. Abre su sección para consultar las seis tarjetas seleccionadas (hasta doce), sus explicaciones y detalles de evaluación. No lee la pantalla de Deriv ni opera sobre sus botones.
+
+Clasificación por catálogo verificado: FOREX exige mercado y tipo `forex`; Range Break exige `synthetic_index/range_index`; Volatility exige `synthetic_index/random_index`, tipo `stockindex` y códigos oficiales comprobados (`R_10/25/50/75/100`, `1HZ10/15/25/30/50/75/90/100V`). Un nombre comercial parecido no basta: las familias desconocidas muestran ESPERAR y no reciben reglas inventadas.
+
+Las reglas fijas registradas son estructura/rechazo y ruptura/retest para FOREX, rechazo/falsa ruptura y continuación de canal para Range Break, e impulso multitemporal para Volatility. Cada hipótesis registra regla y versión. Los últimos 240 minutos se estudian con cuerpos, mechas, niveles previos, pivotes confirmados, ATR y contexto. Se agregan bloques UTC completos de 5m y 15m; no se rellena una vela ausente. Los pivotes se conocen solo después del cierre de dos velas a su derecha y conservan su hora de confirmación. La estructura principal se lee en 5m, con confirmación en 1m y contexto de 15m; el seguimiento dura cinco minutos desde el tick de entrada.
+
+No se cambia de regla por porcentaje histórico. Contradicciones entre temporalidades, indicadores originales opuestos, datos incompletos, mercado cerrado o condiciones ambiguas producen ESPERAR. FOREX usa un filtro horario UTC fijo de 07:00 a 20:00; es una hipótesis de contexto, no una ventaja demostrada.
+
+Los detalles separan: evaluación original, evaluación del lector y sus reglas, y seguimiento futuro pareado. El comparador sigue en su propia sección y almacenamiento. El último 30% cronológico se evalúa sin ajustar parámetros a ese resultado; no es una prueba externa ni una garantía fuera de muestra. Las muestras de resultados no se solapan dentro de cada serie; sus frecuencias de señal y los intervalos Wilson son descriptivos y no corrigen correlación o comparaciones múltiples.
+
+La recopilación futura del lector viene **desactivada**. Al activarla, original y lector pueden compartir una entrada observada para comparación; ESPERAR no se fuerza a RISE/FALL. Para el lector se estudian también retrasos de entrada de 2 y 5 segundos, con precios realmente recibidos y vencimiento a cinco minutos de cada entrada. Son escenarios correlacionados, no tres muestras independientes. Solo se acepta la entrada inicial si la hipótesis sigue vigente. Hay hasta tres flujos, reserva entre paneles, vigilancia de silencio de 15 s y descarte explícito tras cortes. Se conserva todo resultado ya resuelto. Los datos y CSV del lector usan una clave nueva y no alteran registros previos.
+
+La suite ampliada contiene 112 pruebas, incluidas las 88 anteriores; se añade validación de navegador para tarjetas, detalles, recopilación, retrasos, interrupción y CSV. Sigue pendiente la validación instalada y prolongada con datos reales. Todas las reglas son hipótesis experimentales; no se ha demostrado utilidad predictiva ni rentabilidad.
+
 ## Mi sala de trading
 
 La candidata `feature/trading-room` parte de la rama auditada. Conecta la API pública para iniciar el análisis automático mientras el panel permanezca abierto. Se proponen seis activos iniciales (o los que haya disponibles), ampliables hasta doce, sin exigir pestañas abiertas. Usa «Editar activos» para añadir, quitar o reemplazar, y «Revisar gráficos de Deriv» para consultar símbolos visibles en URLs de `dtrader.deriv.com`, sin cambiar la selección. Esa consulta no detecta los gráficos internos de la web. Un símbolo detectado solo se incorpora reemplazando explícitamente uno seleccionado; solo «Añadir» aumenta el número de activos. Si la URL no incluye un símbolo válido, no se infiere a partir del título ni se inspecciona tu cuenta.
