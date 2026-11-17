@@ -476,6 +476,7 @@ async function scan(single=false){
      if(typeof CMP_UI!=='undefined'){try{CMP_UI.onHistory(item.symbol,candles,technical);}catch(e){log('Comparador no actualizado: '+e.message);}}
      const row={symbol:item.symbol,name:item.display_name||item.symbol,type:symbolType(item),direction:signal.dir,score:signal.score,reason:signal.why,lastTime:candles[last].epoch,close:candles[last].close,samples:candles.length,back,pages,quality:'Velas cerradas validables',mode};
      results.push(row);
+     if(typeof ADAPT_UI!=='undefined'){try{ADAPT_UI.onHistory(item,candles,technical);}catch(e){log('Lector no actualizado: '+e.message);}}
      if(typeof CMP_UI!=='undefined'){try{void CMP_UI.signal(row).catch(e=>log('Comparador: '+e.message));}catch(e){log('Comparador: '+e.message);}}
      try{await registerForwardItem(row,h,socket);}catch(e){log(`Seguimiento ${item.symbol} no registrado: ${e.message}`);}
      log(item.symbol+': '+candles.length+' velas válidas');

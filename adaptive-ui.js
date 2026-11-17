@@ -1,0 +1,61 @@
+'use strict';
+const ADAPT_UI=(()=>{
+ const cache=new Map(),jobs=new Map(),active=new Map();let worker=false,state=null,queue=Promise.resolve(),disposed=false,lastSignature='';
+ const note=text=>{$('readerStatus').textContent=text;};
+ const ready=(async()=>{try{const locks=await navigator.locks.query(),live=locks.held.filter(l=>l.name.startsWith('deriv-reader-stream:')).map(l=>l.name.slice('deriv-reader-stream:'.length));state=ADAPTIVE_FOLLOW.restore((await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY],live);$('readerEnable').checked=state.enabled;await save();}catch(e){state=null;note(e.message);}})();
+ function save(){if(!state)return Promise.reject(new Error('Lector sin restaurar'));const snapshot=structuredClone(state);const p=queue.catch(()=>{}).then(()=>navigator.locks.request(ADAPTIVE.KEY,async()=>{
+  const value=(await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY];if(value!==undefined&&(value.version!==1||!Array.isArray(value.groups)))throw new Error('Formato desconocido; no se sobrescribirá');
+  const merged=new Map((value?.groups||[]).map(g=>[g.id,g]));for(const g of snapshot.groups){const old=merged.get(g.id);if(!old)merged.set(g.id,g);else if(g.updatedAt>=old.updatedAt){g.entries=g.entries.map(r=>{const prior=old.entries.find(x=>x.source===r.source&&x.delay===r.delay);return prior&&['ACIERTO','FALLO','EMPATE'].includes(prior.status)?prior:r;});merged.set(g.id,g);}}
+  const groups=[...merged.values()];while(groups.length>120){const i=groups.findIndex(ADAPTIVE_FOLLOW.done);if(i<0)break;groups.splice(i,1);}await chrome.storage.local.set({[ADAPTIVE.KEY]:{version:1,ruleVersion:ADAPTIVE.VERSION,enabled:snapshot.enabled,groups}});
+ }));queue=p;return p;}
+ function persist(){void save().catch(e=>note('Resultados solo en memoria: '+e.message));}
+ function summary(records){const s=COMPARATOR.stats(records);return `${s.win} aciertos / ${s.lose} fallos / ${s.tie} empates · n=${s.n} (${s.decisive} decisivos) · tasa observada ${s.rate===null?'sin datos':s.rate.toFixed(1)+'%'} · Wilson 95% ${s.low===null?'sin datos':s.low.toFixed(1)+'–'+s.high.toFixed(1)+'%'} · ${s.evidence} · Sin ventaja demostrada`;}
+ function paragraph(parent,text){const p=document.createElement('p');p.className='muted';p.textContent=text;parent.append(p);}
+ function render(){
+  const area=$('readerCards'),expanded=new Set([...area.querySelectorAll('details[open]')].map(d=>d.dataset.symbol));area.replaceChildren();let now=null;try{now=serverNow();}catch{}
+  for(const code of ROOM_UI.selected){
+   const item=symbols.find(s=>s.symbol===code),data=cache.get(code),r=data?.reading,box=document.createElement('article');box.className='room-card';const title=document.createElement('strong');title.textContent=item?.display_name||code;box.append(title);
+   const current=r&&now!==null&&now>=r.emittedAt&&now<r.expiresAt,dir=current?r.direction:'ESPERAR';const badge=document.createElement('div');badge.className='room-direction '+(dir==='SUBE'?'up':dir==='BAJA'?'down':'wait');badge.textContent=dir==='SUBE'?'RISE':dir==='BAJA'?'FALL':'ESPERAR';box.append(badge);
+   paragraph(box,r?`${r.family} · ${r.strategy}@${r.version} · horizonte simulado 5 min`:'Esperando metadatos y velas cerradas');
+   paragraph(box,r?`${r.context} · ${r.structure}. Emisión ${new Date(r.emittedAt*1000).toLocaleTimeString()} · ${current?'vence '+new Date(r.expiresAt*1000).toLocaleTimeString():'caducada o sin hora fiable'}. ${r.explanation}`:'No se interpreta el dibujo ni el DOM de Deriv: solo OHLC oficial.');
+   paragraph(box,'Hipótesis experimental · evidencia insuficiente para afirmar utilidad predictiva. Puntuación no equivale a probabilidad.');
+   const details=document.createElement('details');details.dataset.symbol=code;details.open=expanded.has(code);const heading=document.createElement('summary');heading.textContent='Reglas, niveles y evaluación';details.append(heading);
+   if(r){paragraph(details,`Contradicciones: ${r.contradictions.join('; ')||'ninguna detectada por las reglas'}${r.session?' · '+r.session:''}`);if(r.level)paragraph(details,`Soporte ${r.level.support.toPrecision(6)} · resistencia ${r.level.resistance.toPrecision(6)} · distancia al soporte ${r.level.distanceSupport.toPrecision(3)} / resistencia ${r.level.distanceResistance.toPrecision(3)}`);for(const candidate of r.candidates)paragraph(details,`${candidate.id}@${candidate.version}: ${candidate.direction} (${candidate.explanation}). ${candidate.contradictions.join('; ')}`);}
+   if(data?.benchmark){for(const [id,b] of Object.entries(data.benchmark))paragraph(details,`Retrospectivo reservado final 30% · ${id}: ${summary(b.records)} · frecuencia ${b.signals}/${b.opportunities} cierres; muestras de resultados no solapadas. Actualización ${new Date(data.benchAt*1000).toLocaleTimeString()}.`);}else paragraph(details,'Evaluación retrospectiva pendiente o datos insuficientes. No hay ajuste de parámetros.');
+   for(const source of ['ORIGINAL_PAREADO','LECTOR_PROSPECTIVO'])for(const delay of source==='ORIGINAL_PAREADO'?[0]:[0,2,5]){
+    const entries=(state?.groups||[]).filter(g=>g.symbol===code&&g.version===ADAPTIVE.VERSION).flatMap(g=>g.entries.filter(e=>e.source===source&&e.delay===delay));const strategies=[...new Set(entries.map(e=>e.strategy))];if(!strategies.length)strategies.push(source==='ORIGINAL_PAREADO'?'original@1.9':(r?.strategy||'research-wait')+'@'+ADAPTIVE.VERSION);for(const strategy of strategies){const subset=entries.filter(e=>e.strategy===strategy);paragraph(details,`Prospectivo ${source} · ${strategy} · 5 min · retraso ${delay}s: ${summary(subset)} · ${subset.filter(e=>e.status==='INCOMPLETA').length} incompletos. Mismos eventos de origen: muestras correlacionadas.`);}
+   }
+   box.append(details);const link=document.createElement('button');link.textContent='Ir a Deriv (sin cambiar gráficos)';link.addEventListener('click',()=>chrome.runtime.sendMessage({type:'OPEN_DERIV_ASSET',symbol:code},res=>note(chrome.runtime.lastError?.message||res?.message||res?.error||'Usa la navegación manual de la sala.')));box.append(link);area.append(box);
+  }
+ }
+ async function drain(){if(worker)return;worker=true;try{while(jobs.size&&!disposed){const [code,job]=jobs.entries().next().value;jobs.delete(code);try{const benchmark=await ADAPTIVE.benchmark(job.item,job.c,job.t,()=>new Promise(resolve=>setTimeout(resolve,0)));const latest=cache.get(code);if(latest){latest.benchmark=benchmark;latest.benchAt=job.now;}render();}catch(e){note('Evaluación no disponible: '+e.message);}}}finally{worker=false;}}
+ function onHistory(item,c,t){
+  const now=closedThrough(),original=TA.signal(c,t,c.length-1),reading=ADAPTIVE.analyze(item,c,now,original),old=cache.get(item.symbol);reading.emittedAt=serverNow();
+  cache.set(item.symbol,{reading,original,benchmark:old?.benchmark,benchAt:old?.benchAt});if(cache.size>12)cache.delete(cache.keys().next().value);
+  if(ROOM_UI.selected.includes(item.symbol)&&(!old?.benchAt||now-old.benchAt>=600)){jobs.set(item.symbol,{item,c,t,now});void drain();}
+  render();void signal(reading,original).catch(e=>note(e.message));
+ }
+ async function collect(reading,original){
+  await ready;if(!state?.enabled||disposed||!ROOM_UI.selected.includes(reading.symbol)||!ADAPTIVE_FOLLOW.allowed(state.groups,reading))return;
+  if(!['SUBE','BAJA'].includes(reading.direction)&&!['SUBE','BAJA'].includes(original.dir))return;
+  if(active.size>=3){note('No se recopiló '+reading.symbol+': tres flujos activos; no se inventará una entrada posterior.');return;}
+  const now=serverNow();if(now<reading.emittedAt||now>=reading.expiresAt)return;
+  const socket=ws,signalAt=Math.ceil((serverNowMs()+clockAnchor.uncertaintyMs)/1000),controller=new AbortController();let group=null,watchdog=setTimeout(()=>controller.abort(),9000),lastSave=0,lastSettled=0;active.set(reading.symbol,true);
+  try{await request({ticks:reading.symbol,subscribe:1},330000,m=>{
+   assertSession(socket);if(disposed)throw new Error('Panel cerrado');const tick=FORWARD.currentTick(m,serverNow(),2);if(!tick.ok||m.tick.symbol!==reading.symbol)throw new Error(tick.reason||'Símbolo no coincide');
+   if(!group){if(serverNow()>=reading.expiresAt)throw new Error('Hipótesis caducada antes de observar la entrada');if(tick.epoch<signalAt)return false;group=ADAPTIVE_FOLLOW.create(reading,original,{epoch:tick.epoch,price:tick.price},signalAt);state.groups.push(group);while(state.groups.length>120){const i=state.groups.findIndex(ADAPTIVE_FOLLOW.done);if(i<0)break;state.groups.splice(i,1);}persist();}else ADAPTIVE_FOLLOW.feed(group,{epoch:tick.epoch,price:tick.price},serverNow());
+   clearTimeout(watchdog);watchdog=setTimeout(()=>controller.abort(),15000);const count=group.entries.filter(r=>['ACIERTO','FALLO','EMPATE','INCOMPLETA','SIN_SENAL'].includes(r.status)).length;
+   if(serverNow()-lastSave>=5||count!==lastSettled){lastSave=serverNow();lastSettled=count;persist();render();}return ADAPTIVE_FOLLOW.done(group);
+  },controller.signal);}catch(e){if(group){ADAPTIVE_FOLLOW.interrupt(group,e.message);persist();}note('Seguimiento del lector incompleto: '+e.message);}finally{clearTimeout(watchdog);active.delete(reading.symbol);render();}
+ }
+ async function signal(reading,original){await navigator.locks.request('deriv-reader-stream:'+reading.symbol,{ifAvailable:true},async lock=>{if(lock)await collect(reading,original);});}
+ $('readerEnable').addEventListener('change',async()=>{await ready;if(!state)return;const before=state.enabled;state.enabled=$('readerEnable').checked;try{await save();note(state.enabled?'Recopilación del lector activa para señales futuras; máximo tres flujos.':'No se crearán entradas nuevas. Los flujos iniciados terminan.');}catch(e){state.enabled=before;$('readerEnable').checked=before;note(e.message);}});
+ $('readerExport').addEventListener('click',()=>{
+  const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"',iso=v=>Number.isFinite(v)?new Date(v*1000).toISOString():'';
+  const rows=(state?.groups||[]).flatMap(g=>g.entries.map(r=>[g.symbol,g.family,r.strategy,r.ruleVersion,r.source,5,r.delay,r.direction,iso(g.emittedAt),iso(r.entryTime),r.entry,iso(r.target),iso(r.exitTime),r.exit,r.status,r.reason].map(esc).join(',')));
+  for(const [symbol,data] of cache)for(const [strategy,b] of Object.entries(data.benchmark||{}))for(const r of b.records)rows.push([symbol,data.reading.family,strategy,strategy==='original@1.9'?'1.9':ADAPTIVE.VERSION,r.source,5,0,r.direction,iso(r.entryTime),iso(r.entryTime),r.entry,iso(r.exitTime),iso(r.exitTime),r.exit,r.result,'Cierres de referencia no ejecutables'].map(esc).join(','));
+  const url=URL.createObjectURL(new Blob(['symbol,family,strategy,rule_version,source,horizon_minutes,entry_delay_seconds,direction,signal_time,entry_time,entry_price,target_time,exit_time,exit_price,result,reason\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='deriv-lector-adaptativo.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+ });
+ function refresh(){if(disposed)return;let now=null;try{now=serverNow();}catch{}const signature=ROOM_UI.selected.join('|')+'|'+[...cache.values()].map(d=>now!==null&&now<d.reading.expiresAt).join();if(signature!==lastSignature){lastSignature=signature;render();}setTimeout(refresh,1000);}setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;jobs.clear();});
+ return {ready,onHistory,signal,render};
+})();

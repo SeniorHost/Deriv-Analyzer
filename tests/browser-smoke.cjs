@@ -9,7 +9,7 @@ const http=require('node:http');
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  const server=http.createServer(async(req,res)=>{
   const name=req.url.split('?')[0];
-  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
+  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');
   try{res.end(await fs.readFile(path.resolve(__dirname,'..'+name)));}catch{res.writeHead(500);res.end();}
  });
@@ -27,9 +27,9 @@ const http=require('node:http');
    ws.onMessage(raw=>{
     const m=JSON.parse(raw);sent.push(m);const respond=data=>ws.send(JSON.stringify({req_id:m.req_id,...data}));
     if(m.time)respond({time:Math.floor(Date.now()/1000)});
-    else if(m.active_symbols)respond({active_symbols:Array.from({length:12},(_,i)=>({underlying_symbol:i?'VOL_'+i:'1HZ10V',underlying_symbol_name:'Volatility '+i,market:'synthetic_index'}))});
+    else if(m.active_symbols)respond({active_symbols:Array.from({length:12},(_,i)=>({underlying_symbol:i?'VOL_'+i:'1HZ10V',underlying_symbol_name:'Volatility '+i,market:'synthetic_index',submarket:'random_index',underlying_symbol_type:'stockindex'}))});
     else if(m.ticks_history){historyCalls++;const end=m.end==='latest'?Math.floor(Date.now()/60000)*60:Math.floor(Number(m.end)/60)*60;const candles=Array.from({length:m.count},(_,i)=>{const close=100+Math.sin((end/60-m.count+1+i)/4)*2;return {epoch:end-(m.count-1-i)*60,open:close,high:close+.5,low:close-.5,close};});respond({candles});}
-    else if(m.ticks)setTimeout(()=>{respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101}});for(let i=1;i<=10;i++)setTimeout(()=>respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101+i/10}}),i*100);},2100);
+    else if(m.ticks)setTimeout(()=>{respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101}});for(let i=1;i<=60;i++)setTimeout(()=>respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101+i/10}}),i*100);},2100);
     else if(m.forget)respond({forget:1});
     else if(m.ping)respond({ping:'pong'});
     else throw new Error('Unexpected API operation');
@@ -42,7 +42,7 @@ const http=require('node:http');
   assert.match(await page.locator('#log').innerText(),/Hora Deriv sincronizada/);
   await page.waitForFunction(()=>document.querySelector('#count').textContent.includes('Finalizado'),{},{timeout:15000});
   assert.match(await page.locator('#count').innerText(),/12\/12 · 0 errores/);
-  assert.equal(await page.locator('.room-card').count(),6);assert.equal(historyCalls,36);
+  assert.equal(await page.locator('#results .room-card').count(),6);assert.equal(historyCalls,36);
   assert.equal(await page.locator('#auto').isChecked(),false);
   await page.evaluate(async()=>{
    cancelScan=false;
@@ -50,6 +50,12 @@ const http=require('node:http');
    const stored=await chrome.storage.local.get('deriv_analyzer_forward_v16');
    if(!stored.deriv_analyzer_forward_v16?.some(r=>r.horizon===1&&r.status==='PENDIENTE'))throw new Error('Prospective entry was not persisted');
   });
+  await page.locator('section[aria-label="Lector inteligente de gráficos"] > details > summary').click();
+  await page.waitForFunction(()=>document.querySelectorAll('#readerCards .room-card').length===6);
+  assert.equal(await page.locator('#readerEnable').isChecked(),false);
+  assert.match(await page.locator('#readerCards').innerText(),/horizonte simulado 5 min/);
+  await page.locator('#readerCards details').first().locator('summary').click();
+  assert.match(await page.locator('#readerCards').innerText(),/Sin ventaja demostrada/);
   await page.locator('section[aria-label="Comparador de estrategias"] summary').click();
   assert.equal(await page.locator('#cmpEnable').isChecked(),false);
   assert.equal(await page.locator('#cmpResults > div').count(),2);
@@ -60,16 +66,16 @@ const http=require('node:http');
   await page.locator('.selection-row select').first().selectOption('VOL_7');
   await page.locator('.selection-row button').first().click();
   await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_7')&&!ROOM_UI.selected.includes('1HZ10V'));
-  assert.equal(await page.locator('.room-card').count(),6);
+  assert.equal(await page.locator('#results .room-card').count(),6);
   await page.click('#importTabs');await page.waitForFunction(()=>document.querySelector('#syncReference').textContent.includes('VOL_11'));
-  assert.equal(await page.locator('.room-card').count(),6);
+  assert.equal(await page.locator('#results .room-card').count(),6);
   assert.equal(await page.evaluate(()=>ROOM_UI.selected.includes('VOL_11')),false);
   await page.locator('#syncReference select').first().selectOption('VOL_1');
   await page.locator('#syncReference select').last().selectOption('VOL_11');
   await page.getByRole('button',{name:'Confirmar reemplazo manual'}).click();
   await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_11')&&!ROOM_UI.selected.includes('VOL_1'));
-  assert.equal(await page.locator('.room-card').count(),6);
-  await page.click('#importTabs');assert.equal(await page.locator('.room-card').count(),6);
+  assert.equal(await page.locator('#results .room-card').count(),6);
+  await page.click('#importTabs');assert.equal(await page.locator('#results .room-card').count(),6);
   await page.locator('.room-card button').first().click();
   assert.equal(await page.evaluate(()=>__roomMessages.some(m=>m.type==='CREATE_DERIV_TAB')),false);
   await page.selectOption('#addAsset','VOL_6');await page.click('#addRoom');
@@ -79,17 +85,23 @@ const http=require('node:http');
   if(process.env.ROOM_SCREENSHOT)await page.screenshot({path:process.env.ROOM_SCREENSHOT,fullPage:true});
   const downloadPromise=page.waitForEvent('download');await page.click('#exportForward');const download=await downloadPromise;
   const file=path.join(output,'forward.csv');await download.saveAs(file);assert.match(await fs.readFile(file,'utf8'),/^symbol,name,recordedAt/);
+  await page.check('#readerEnable');
+  await page.waitForFunction(()=>Boolean(__storage.deriv_analyzer_adaptive_v1?.enabled));
+  await page.evaluate(()=>{const at=serverNow();void ADAPT_UI.signal({symbol:ROOM_UI.selected[0],family:'VOLATILITY',strategy:'volatility-impulse',version:ADAPTIVE.VERSION,direction:'SUBE',emittedAt:at,expiresAt:at+60},{dir:'SUBE'});});
+  await page.waitForFunction(()=>__storage.deriv_analyzer_adaptive_v1?.groups.some(g=>g.entries.filter(e=>e.source==='LECTOR_PROSPECTIVO').every(e=>e.entryTime)));
   await page.check('#cmpEnable');
   await page.waitForFunction(()=>Boolean(__storage.deriv_analyzer_comparator_v1?.enabled));
   await page.evaluate(()=>{void CMP_UI.signal({symbol:ROOM_UI.selected[0],lastTime:Math.floor(closedThrough()/60)*60-60,direction:'SUBE'});});
   await page.waitForFunction(()=>{const s=__storage.deriv_analyzer_comparator_v1;return s.groups.some(g=>g.evaluations.filter(r=>r.mode==='ticks').every(r=>r.status==='ACIERTO'));},{},{timeout:15000});
   await page.evaluate(()=>ws.close());
   await page.waitForFunction(()=>{const s=__storage.deriv_analyzer_comparator_v1;return s.groups.some(g=>g.evaluations.filter(r=>r.mode==='time').every(r=>r.status==='INCOMPLETA'));});
+  await page.waitForFunction(()=>__storage.deriv_analyzer_adaptive_v1?.groups.some(g=>g.entries.every(e=>e.status==='INCOMPLETA'||e.status==='SIN_SENAL')));
+  const readerDownloadPromise=page.waitForEvent('download');await page.click('#readerExport');const readerDownload=await readerDownloadPromise;const readerFile=path.join(output,'reader.csv');await readerDownload.saveAs(readerFile);assert.match(await fs.readFile(readerFile,'utf8'),/LECTOR_PROSPECTIVO/);
   const cmpDownloadPromise=page.waitForEvent('download');await page.click('#cmpExport');const cmpDownload=await cmpDownloadPromise;
   const cmpFile=path.join(output,'comparator.csv');await cmpDownload.saveAs(cmpFile);assert.match(await fs.readFile(cmpFile,'utf8'),/PROSPECTIVO_FLUJO/);
   // Reload checks selection and records using a persistent Chrome-storage mock.
   await page.reload();await page.waitForFunction(()=>document.querySelector('#forwardCount').textContent.includes('pendientes'));
-  await page.waitForFunction(()=>document.querySelectorAll('.room-card').length===6);
+  await page.waitForFunction(()=>document.querySelectorAll('#results .room-card').length===6);
   assert.deepEqual(errors,[]);assert.equal(sent.some(m=>m.buy||m.sell||m.proposal||m.authorize),false);
   console.log('Browser smoke PASS: actual DOM, public-API mock, scan, prospective entry with Web Lock, CSV, reload; no page errors.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));await fs.rm(output,{recursive:true,force:true});}
