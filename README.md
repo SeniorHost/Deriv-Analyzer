@@ -12,6 +12,22 @@ Las primeras 151 señales prospectivas tuvieron 75 aciertos y 76 fallos. **No ex
 
 La suite ampliada se ejecuta con `node --test tests/*.test.cjs`: 71 pruebas, con los 59 casos de la candidata anterior y doce regresiones de sincronización. El caso anterior que esperaba crear una pestaña cuando otro activo ya estaba abierto ahora exige enfocar Deriv sin crearla; se conserva su cobertura de navegación. El workflow valida pushes a la rama de la sala y PR hacia la rama auditada o `main`.
 
+## Comparador de estrategias (experimental)
+
+La rama `feature/duration-comparator`, basada en `a92d913`, añade una sección plegable independiente. Compara 1, 3, 5 y 10 minutos, y 5/10 ticks **reales**. El horizonte de la sala sigue siendo cinco minutos; no se cambian indicadores ni alertas.
+
+Elige activo, modalidad y duración. Se muestran por separado referencia retrospectiva y seguimiento prospectivo, con aciertos/fallos/empates, muestra evaluada, tasa observada sin empates e intervalo Wilson 95%. Menos de 30 casos decisivos se etiqueta «Datos insuficientes»; a partir de 30 sigue siendo «experimental» y «Sin ventaja demostrada». Los intervalos son puntuales, no corrigen comparaciones múltiples ni garantizan independencia. No se selecciona un ganador.
+
+Los retrospectivos por tiempo usan los cierres históricos auditados; los de ticks requieren pulsar «Consultar ventana histórica de ticks». Se consulta hasta 1.000 eventos reales, como máximo una vez por minuto y activo; no se convierten velas en ticks ni se rellena una secuencia incompleta. Puede no haber suficientes señales del tramo retrospectivo dentro de esa ventana. En ticks, la señal usa los indicadores de velas cerradas y la entrada hipotética es el primer tick estrictamente posterior al cierre, como máximo 15 segundos después. La salida es el quinto o décimo evento posterior a esa entrada; los casos de cada duración no se solapan en índices.
+
+«Recopilar prospectivo» viene desactivado. Al activarlo se observan señales nuevas de los activos de la sala, con cotización propia posterior a la señal y al margen del reloj sincronizado. Hasta tres flujos simultáneos comparten la conexión existente. Se evalúan las seis duraciones sin nuevas entradas del mismo activo durante diez minutos; las modalidades comparten entrada y sus resultados están correlacionados. La resolución de tiempo de la API es en segundos, no milisegundos. Para minutos se usa el último tick observado en o antes del vencimiento, de antigüedad ≤15 segundos; para ticks se cuentan eventos posteriores, incluso si tienen el mismo precio y segundo.
+
+Una desconexión, reinicio sin flujo activo, secuencia desordenada o silencio de 15 segundos deja lo pendiente «INCOMPLETA», nunca lo reconstruye inventando ticks. Los resultados ya resueltos se conservan. Un panel que ya posee un flujo por activo mantiene su reserva mediante Web Locks. Desactivar la recopilación impide entradas nuevas; los flujos ya iniciados terminan. Se guardan hasta 120 grupos de seis evaluaciones en una clave independiente; los registros anteriores no se migran a modalidades inventadas ni se alteran.
+
+El CSV del comparador incluye todos sus prospectivos en memoria y el retrospectivo visible, con fuentes explícitas `PROSPECTIVO_FLUJO`, `RETROSPECTIVO_CIERRE` o `RETROSPECTIVO_TICKS`. Los CSV anteriores siguen disponibles. Estas observaciones no representan contratos ejecutables ni liquidaciones reales, y no tienen en cuenta pagos o costes.
+
+Validación ampliada: **88 pruebas** (incluidas las 71 anteriores), más prueba de navegador con API simulada. Las comprobaciones de una extensión instalada y sesiones largas reales siguen pendientes.
+
 ## Correcciones tras la prueba real de v1.8
 
 - Las dos señales prospectivas observadas en la v1.8 (`1HZ10V` y `1HZ30V`) demostraron que el registro ya funciona; fueron almacenadas en `chrome.storage.local`. Esta versión usa la misma clave `deriv_analyzer_forward_v16`, por lo que se mantienen mientras se cargue como **actualización de la misma extensión** (no si se instala como extensión nueva o se elimina la anterior).

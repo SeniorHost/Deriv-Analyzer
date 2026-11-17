@@ -11,6 +11,13 @@
 <div id="alertStatus" role="status" aria-live="polite" class="muted"></div><span id="count" class="muted">Esperando conexión</span>
 <div id="results" class="room-grid"></div></section>
 <section><strong>Alternativas para revisar</strong><p class="muted">Escaneo de hasta 12 activos, incluidos los seleccionados. Se sugieren señales vigentes con puntuación ≥60, al menos 10 puntos sobre el mínimo vigente de tu sala y el filtro retrospectivo auditado. No demuestra rentabilidad. El reemplazo siempre requiere tu elección.</p><div id="suggestions"></div></section>
+<section aria-label="Comparador de estrategias"><details><summary><strong>Comparador de estrategias · experimental</strong></summary>
+<p class="muted">Resultados retrospectivos y prospectivos separados. Sin ventaja demostrada. Wilson 95% no corrige múltiples comparaciones entre activos y duraciones ni garantiza independencia. No se elige una duración ganadora ni se cambian indicadores.</p>
+<div class="line"><label>Activo<select id="cmpAsset"></select></label><label>Modalidad<select id="cmpMode"><option value="time">Tiempo</option><option value="ticks">Ticks reales</option></select></label><label>Duración<select id="cmpDuration"></select></label></div>
+<label class="check"><input id="cmpEnable" type="checkbox"> Recopilar prospectivo para las seis duraciones (sin operaciones)</label>
+<p class="muted">Entrada nueva por tick observado tras la señal. Ticks: eventos posteriores en flujo continuo, incluso si repiten precio o segundo. Tiempo: último tick ≤ vencimiento, antigüedad máxima 15 s. Máximo tres flujos; no se aceptan entradas del mismo activo durante 10 min para evitar muestras solapadas. Pausar impide entradas nuevas, no cancela las ya iniciadas.</p>
+<button id="cmpTicks">Consultar ventana histórica de ticks</button><button id="cmpExport">Exportar CSV: prospectivo y retrospectivo visible</button><div id="cmpStatus" role="status" class="muted"></div><div id="cmpResults"></div>
+</details></section>
 <section><strong>Seguimiento prospectivo · sin operaciones</strong>
 <div class="muted">Cuando hay SUBE (Rise) o BAJA (Fall), se solicita una cotización actual de la API y se guarda como precio de referencia observado (no ejecutable). No se reutiliza el cierre anterior como precio de entrada. El resultado se comprueba con un tick del historial no posterior al vencimiento. El seguimiento es experimental, diferente de un contrato real: no verifica pagos, barreras ni contratos disponibles. Mantén el panel abierto para el monitoreo automático; la extensión intenta reconectar si el WebSocket se corta.</div>
 <div class="line"><button id="watch" disabled>Activar monitoreo cada minuto</button><span id="watchStatus" class="muted">Apagado · requiere panel abierto</span></div>
@@ -21,4 +28,4 @@
 </section>
 <section><strong>Registro</strong><pre id="log">Esperando conexión.</pre><div class="line"><button id="export">Exportar resumen CSV</button><button id="tradesExport">Exportar señales CSV</button></div></section>
 <footer>API pública de Deriv · Datos de mercado sin autenticación. No se crean ni ejecutan órdenes. Revisa disponibilidad, pagos y restricciones en Deriv antes de cualquier decisión.</footer>
-<script src="indicators.js"></script><script src="forward.js"></script><script src="room.js"></script><script src="panel.js"></script><script src="room-ui.js"></script></body></html>
+<script src="indicators.js"></script><script src="forward.js"></script><script src="room.js"></script><script src="comparator.js"></script><script src="panel.js"></script><script src="room-ui.js"></script><script src="comparator-ui.js"></script></body></html>
