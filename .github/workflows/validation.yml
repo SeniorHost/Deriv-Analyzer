@@ -1,0 +1,54 @@
+name: Validate candidate
+
+on:
+  push:
+    branches: [audit/v1.9-stability]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validation:
+    name: Syntax and 48 offline tests (Node.js 20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(git ls-files -z -- '*.js' '*.cjs')
+
+      - name: Check whitespace in candidate changes
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          git diff --check
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff-tree --check --root -r "$HEAD_SHA"
+          else
+            git diff --check "$BASE_SHA" "$HEAD_SHA"
+          fi
+
+      - name: Run offline automated tests
+        run: node --test tests/*.test.cjs
