@@ -37,6 +37,20 @@ chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
  operation.then(sendResponse,error=>sendResponse({ok:false,error:String(error?.message||error)}));
  return true;
 });
+// Reuse the extension window rather than opening a new independent scanner every click.
+let scannerWindowRequest=Promise.resolve();
+chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
+ if(msg?.type!=='OPEN_SCANNER_WINDOW')return;
+ const run=async()=>{
+  const target=chrome.runtime.getURL('panel.html'),tabs=await chrome.tabs.query({});
+  const tab=tabs.find(t=>t.url?.startsWith(target));
+  if(tab){await chrome.tabs.update(tab.id,{active:true});await chrome.windows.update(tab.windowId,{focused:true});}
+  else await chrome.windows.create({url:target+'?view=full',type:'popup',width:1100,height:850});
+  return {ok:true};
+ };
+ const p=scannerWindowRequest.catch(()=>{}).then(run);scannerWindowRequest=p;p.then(sendResponse,e=>sendResponse({ok:false,error:String(e?.message||e)}));return true;
+});
+
 chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
  if(msg?.type!=='NAVIGATE_DERIV'||typeof msg.symbol!=='string'||!/^[A-Za-z0-9_]{2,30}$/.test(msg.symbol))return;
  (async()=>{

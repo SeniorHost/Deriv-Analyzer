@@ -1,4 +1,19 @@
-# Deriv Analyzer v1.9 — estabilidad de conexión y hora de Deriv
+# Deriv Analyzer v2.0 — escáner inteligente multiactivo
+
+Candidata experimental en `feature/intelligent-market-scanner`, basada en `feature/simple-chart-reader` (`3725728`). No ejecuta operaciones y no existe ventaja financiera demostrada.
+
+- **Mejores señales disponibles**: hasta siete tarjetas dinámicas con tendencia, RISE/FALL/SIN CONFIRMACIÓN, método versionado, explicación, vigencia, antigüedad y evidencia. Las tarjetas confirmadas conservan su posición mientras sean válidas; una vela caducada no se reactiva.
+- **Mi sala · favoritos**: selección manual independiente, inicialmente seis y máximo siete, con añadir/quitar/reemplazar/reordenar. Se conserva la selección anterior completa al migrar, incluidos los símbolos fuera del límite activo; la clave anterior no se borra. El escáner y la detección de pestañas nunca añaden favoritos por su cuenta.
+- **Vista completa/compacta** y **Abrir en ventana**: tabla del catálogo con búsqueda y filtros; una sola vista controla la conexión pública y las demás reflejan resultados y envían controles. Sin vistas abiertas no hay monitoreo.
+- Recorrido progresivo de todas las familias compatibles del catálogo, presupuesto global predeterminado de 36 solicitudes de datos/60 s, dos trabajadores, caché incremental y reintentos limitados. Muestra progreso real y datos antiguos. No descarga 2.400 velas por activo cada minuto.
+- Registro de once métodos: Forex, Range Break y Volatility; observadores conservadores de Boom/Crash, Step y Jump. Los desconocidos se abstienen. La regla Volatility anterior queda intacta. No se selecciona un método por su tasa retrospectiva.
+- Investigación avanzada separada en desarrollo/validación/reservado con purgas, prospectivo posterior con retrasos 0/2/5 s, original pareado, estadísticas y CSV. Sin pagos observados declarados: **Rentabilidad no evaluable**.
+
+Consulta [instalación y límites](INSTALL.md), [reglas y versiones](STRATEGIES.md) y [evidencia de auditoría](AUDIT.md). Permanecen el lector original, comparador, seguimiento y CSV anteriores. Los resultados antiguos no se convierten en resultados v2. Los permisos siguen siendo `sidePanel`, `tabs` y `storage`: sin inyección en Deriv, credenciales ni lectura de sus gráficos internos.
+
+## Historial de funcionalidades anteriores
+
+Las secciones siguientes documentan las versiones anteriores y sus decisiones de auditoría. Sus límites antiguos de doce activos y conteos de pruebas corresponden a esas versiones; en esta candidata rigen los límites descritos arriba.
 
 ## Interfaz sencilla — feature/simple-chart-reader
 

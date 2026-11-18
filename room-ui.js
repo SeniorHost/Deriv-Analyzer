@@ -3,14 +3,15 @@ const ROOM_UI=(()=>{
  let selected=null,seen=[],usable=false,queue=Promise.resolve(),signature='',disposed=false,createSymbol=null;
  const message=text=>{$('roomMessage').textContent=text;};
  const ready=(async()=>{try{
-  const value=(await chrome.storage.local.get(ROOM.KEY))[ROOM.KEY];
-  if(value!==undefined){selected=ROOM.selection(value.selection);seen=Array.isArray(value.seen)?value.seen.filter(s=>typeof s==='string').slice(-240):[];}
+  const value=typeof MARKET_STORE==='undefined'?(await chrome.storage.local.get(ROOM.KEY))[ROOM.KEY]:await MARKET_STORE.read();
+  if(value!==undefined){selected=value.selection===null?null:ROOM.selection(value.selection);seen=Array.isArray(value.seen)?value.seen.filter(s=>typeof s==='string').slice(-240):[];}
   usable=true;editor();render(results);
  }catch(e){message('No se pudo restaurar la sala: '+e.message);}})();
- function save(){return chrome.storage.local.set({[ROOM.KEY]:{selection:selected,seen:seen.slice(-240)}});}
+ function save(){if(typeof MARKET_STORE!=='undefined')return MARKET_STORE.seen(seen);return chrome.storage.local.set({[ROOM.KEY]:{selection:selected,seen:seen.slice(-240)}});}
  function change(fn){
   queue=queue.catch(()=>{}).then(async()=>{
    await ready;if(!usable)throw new Error('Selección no restaurada; vuelve a abrir el panel');
+   if(typeof MARKET_STORE!=='undefined'){const value=await MARKET_STORE.update(fn);selected=value.selection;editor();render(results);message('Favoritos guardados; la sala dinámica no los modifica.');return;}
    const next=ROOM.selection(fn(selected||[])),previous=selected;selected=next;
    try{await save();}catch(e){selected=previous;throw e;}
    editor();render(results);message('Selección guardada. No se han cambiado tus pestañas.');
@@ -22,13 +23,13 @@ const ROOM_UI=(()=>{
  function editor(){
   const available=symbols.filter(s=>!(selected||[]).includes(s.symbol));
   const add=$('addAsset');add.replaceChildren();for(const s of available){const o=document.createElement('option');o.value=s.symbol;o.textContent=s.display_name;add.append(o);}
-  $('addRoom').disabled=!usable||!available.length||(selected||[]).length>=ROOM.MAX;
+  $('addRoom').disabled=!usable||!available.length||(selected||[]).length>=(typeof MARKET_STORE==='undefined'?ROOM.MAX:7);
   $('selectionEditor').replaceChildren();
   for(const code of selected||[]){
    const row=document.createElement('div');row.className='selection-row';
    const name=document.createElement('span');name.textContent=symbols.find(s=>s.symbol===code)?.display_name||code;row.append(name);
    const target=select('Reemplazar '+code,available.map(s=>[s.symbol,s.display_name]));row.append(target);
-   const replace=button('Reemplazar',()=>change(list=>ROOM.change(list,code,target.value)));replace.disabled=!available.length;row.append(replace,button('Quitar',()=>change(list=>list.filter(s=>s!==code))));$('selectionEditor').append(row);
+   const replace=button('Reemplazar',()=>change(list=>ROOM.change(list,code,target.value)));replace.disabled=!available.length;row.append(replace,button('Quitar',()=>change(list=>list.filter(s=>s!==code))));if(typeof MARKET_STORE!=='undefined'){for(const [label,delta] of [['Subir',-1],['Bajar',1]]){const move=button(label,()=>change(list=>{const at=list.indexOf(code),to=at+delta;if(at<0||to<0||to>=list.length)return list;const next=[...list];[next[at],next[to]]=[next[to],next[at]];return next;}));move.disabled=selected.indexOf(code)+delta<0||selected.indexOf(code)+delta>=selected.length;row.append(move);}}$('selectionEditor').append(row);
   }
  }
  function open(code){
@@ -44,8 +45,8 @@ const ROOM_UI=(()=>{
  });
  function render(rows){
   let now=null;try{now=serverNow();}catch{}
-  if(typeof SIMPLE_READER!=='undefined')$('roomTitle').textContent=`Mis ${selected===null?6:selected.length} activos`;
-  $('roomCount').textContent=`${(selected||[]).length}/12 activos`;
+  if(typeof SIMPLE_READER!=='undefined')$('roomTitle').textContent=typeof MARKET_STORE==='undefined'?`Mis ${selected===null?6:selected.length} activos`:'Mi sala · favoritos';
+  $('roomCount').textContent=`${(selected||[]).length}/${typeof MARKET_STORE==='undefined'?12:7} activos`;
   const container=$('results');container.replaceChildren();
   const notices=[];
   for(const code of selected||[]){
@@ -86,7 +87,7 @@ const ROOM_UI=(()=>{
   }
   if(!alternatives.length)$('suggestions').textContent='Sin alternativas que cumplan los criterios en este escaneo.';
  }
- async function connected(){await ready;if(!usable)return;await queue;if(selected===null){selected=ROOM.defaults(symbols);try{await save();}catch(e){selected=null;message('No se pudo guardar la selección inicial: '+e.message);return;}}editor();render(results);if(!watchOn)toggleWatch();void scan(false);}
+ async function connected(){await ready;if(!usable)return;await queue;if(selected===null){selected=ROOM.defaults(symbols);try{if(typeof MARKET_STORE!=='undefined')await MARKET_STORE.update(()=>selected.slice(0,7));else await save();}catch(e){selected=null;message('No se pudo guardar la selección inicial: '+e.message);return;}}editor();render(results);if(!watchOn)toggleWatch();void scan(false);}
  $('editRoom').addEventListener('click',()=>{const editor=$('roomEditor');editor.hidden=!editor.hidden;$('editRoom').setAttribute('aria-expanded',String(!editor.hidden));});
  $('addRoom').addEventListener('click',()=>{const next=$('addAsset').value;void change(list=>ROOM.change(list,null,next));});
  $('importTabs').addEventListener('click',()=>chrome.runtime.sendMessage({type:'INSPECT_DERIV_VIEWS'},res=>{
@@ -111,5 +112,5 @@ const ROOM_UI=(()=>{
  }
  function refresh(){if(disposed)return;const next=results.map(r=>{try{if(typeof SIMPLE_READER!=='undefined')return JSON.stringify(SIMPLE_READER.model(r,typeof ADAPT_UI==='undefined'?null:ADAPT_UI.view(r.symbol),serverNow(),$('primaryMethod').value||'adaptive'));return ROOM.alert(r,serverNow()).active;}catch{return false;}}).join('|');if(next!==signature){signature=next;render(results);}setTimeout(refresh,1000);}
  setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;});
- return {ready,connected,render,change,get selected(){return [...(selected||[])];}};
+ return {ready,connected,render,change,async refreshFavorites(){if(typeof MARKET_STORE==='undefined')return;const value=await MARKET_STORE.read();selected=value.selection;seen=value.seen||[];editor();render(results);$('favoriteMigration').textContent=value.overflow?.length?'Selección anterior completa conservada; fuera de los siete favoritos activos: '+value.overflow.join(', '):'';},get selected(){return [...(selected||[])];}};
 })();

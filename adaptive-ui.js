@@ -2,7 +2,7 @@
 const ADAPT_UI=(()=>{
  const cache=new Map(),jobs=new Map(),active=new Map();let worker=false,state=null,queue=Promise.resolve(),disposed=false,lastSignature='';
  const note=text=>{$('readerStatus').textContent=text;};
- const ready=(async()=>{try{const locks=await navigator.locks.query(),live=locks.held.filter(l=>l.name.startsWith('deriv-reader-stream:')).map(l=>l.name.slice('deriv-reader-stream:'.length));state=ADAPTIVE_FOLLOW.restore((await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY],live);$('readerEnable').checked=state.enabled;await save();}catch(e){state=null;note(e.message);}})();
+ const ready=(async()=>{try{if(typeof MARKET_SESSION!=='undefined')await MARKET_SESSION.ready;const locks=await navigator.locks.query(),live=locks.held.filter(l=>l.name.startsWith('deriv-reader-stream:')).map(l=>l.name.slice('deriv-reader-stream:'.length));state=ADAPTIVE_FOLLOW.restore((await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY],live);$('readerEnable').checked=state.enabled;if(typeof MARKET_SESSION==='undefined'||MARKET_SESSION.owner)await save();}catch(e){state=null;note(e.message);}})();
  function save(){if(!state)return Promise.reject(new Error('Lector sin restaurar'));const snapshot=structuredClone(state);const p=queue.catch(()=>{}).then(()=>navigator.locks.request(ADAPTIVE.KEY,async()=>{
   const value=(await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY];if(value!==undefined&&(value.version!==1||!Array.isArray(value.groups)))throw new Error('Formato desconocido; no se sobrescribirá');
   const merged=new Map((value?.groups||[]).map(g=>[g.id,g]));for(const g of snapshot.groups){const old=merged.get(g.id);if(!old)merged.set(g.id,g);else if(g.updatedAt>=old.updatedAt){g.entries=g.entries.map(r=>{const prior=old.entries.find(x=>x.source===r.source&&x.delay===r.delay);return prior&&['ACIERTO','FALLO','EMPATE'].includes(prior.status)?prior:r;});merged.set(g.id,g);}}
@@ -38,7 +38,7 @@ const ADAPT_UI=(()=>{
   render();void signal(reading,original).catch(e=>note(e.message));
  }
  async function collect(reading,original){
-  await ready;if(!state?.enabled||disposed||!ROOM_UI.selected.includes(reading.symbol)||!ADAPTIVE_FOLLOW.allowed(state.groups,reading))return;
+  await ready;if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner)return;if(!state?.enabled||disposed||!ROOM_UI.selected.includes(reading.symbol)||!ADAPTIVE_FOLLOW.allowed(state.groups,reading))return;
   if(!['SUBE','BAJA'].includes(reading.direction)&&!['SUBE','BAJA'].includes(original.dir))return;
   if(active.size>=3){note('No se recopiló '+reading.symbol+': tres flujos activos; no se inventará una entrada posterior.');return;}
   const now=serverNow();if(now<reading.emittedAt||now>=reading.expiresAt)return;
@@ -56,8 +56,8 @@ const ADAPT_UI=(()=>{
   const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"',iso=v=>Number.isFinite(v)?new Date(v*1000).toISOString():'';
   const rows=(state?.groups||[]).flatMap(g=>g.entries.map(r=>[g.symbol,g.family,r.strategy,r.ruleVersion,r.source,5,r.delay,r.direction,iso(g.emittedAt),iso(r.entryTime),r.entry,iso(r.target),iso(r.exitTime),r.exit,r.status,r.reason].map(esc).join(',')));
   for(const [symbol,data] of cache)for(const [strategy,b] of Object.entries(data.benchmark||{}))for(const r of b.records)rows.push([symbol,data.reading.family,strategy,strategy==='original@1.9'?'1.9':ADAPTIVE.VERSION,r.source,5,0,r.direction,iso(r.entryTime),iso(r.entryTime),r.entry,iso(r.exitTime),iso(r.exitTime),r.exit,r.result,'Cierres de referencia no ejecutables'].map(esc).join(','));
-  const url=URL.createObjectURL(new Blob(['symbol,family,strategy,rule_version,source,horizon_minutes,entry_delay_seconds,direction,signal_time,entry_time,entry_price,target_time,exit_time,exit_price,result,reason\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='deriv-lector-adaptativo.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+  downloadCsv(new Blob(['symbol,family,strategy,rule_version,source,horizon_minutes,entry_delay_seconds,direction,signal_time,entry_time,entry_price,target_time,exit_time,exit_price,result,reason\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}),'deriv-lector-adaptativo.csv');
  });
  function refresh(){if(disposed)return;let now=null;try{now=serverNow();}catch{}const signature=ROOM_UI.selected.join('|')+'|'+[...cache.values()].map(d=>now!==null&&now<d.reading.expiresAt).join();if(signature!==lastSignature){lastSignature=signature;render();}setTimeout(refresh,1000);}setTimeout(refresh,1000);window.addEventListener('beforeunload',()=>{disposed=true;jobs.clear();});
- return {ready,onHistory,signal,render,view(code){const d=cache.get(code);return d?structuredClone({reading:d.reading,original:d.original,observed:d.observed}):null;}};
+ return {ready,onHistory,signal,render,snapshot(){return structuredClone({state,cache:[...cache]});},applyViews(values){for(const [code,value] of values){if(value)cache.set(code,{...cache.get(code),...value});}render();},hydrate(value){if(!value)return;state=value.state;cache.clear();for(const [code,data] of value.cache)cache.set(code,data);render();},async reload(){state=ADAPTIVE_FOLLOW.restore((await chrome.storage.local.get(ADAPTIVE.KEY))[ADAPTIVE.KEY]);$('readerEnable').checked=state.enabled;render();},view(code){const d=cache.get(code);return d?structuredClone({reading:d.reading,original:d.original,observed:d.observed}):null;}};
 })();

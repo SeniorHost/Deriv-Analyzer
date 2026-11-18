@@ -9,27 +9,32 @@ const http=require('node:http');
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  const server=http.createServer(async(req,res)=>{
   const name=req.url.split('?')[0];
-  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js','/simple-reader.js'].includes(name)){res.writeHead(404);res.end();return;}
+  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js','/simple-reader.js','/market-strategies.js','/market-core.js','/market-session.js','/scanner-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');
   try{res.end(await fs.readFile(path.resolve(__dirname,'..'+name)));}catch{res.writeHead(500);res.end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const output=await fs.mkdtemp(path.join(os.tmpdir(),'deriv-browser-'));
  try{
-  const page=await browser.newPage();const errors=[],sent=[];
+  const context=await browser.newContext();const page=await context.newPage();const errors=[],sent=[];let socketCount=0,activeSockets=0,maxActiveSockets=0;
   page.on('pageerror',error=>errors.push(error.message));
-  await page.addInitScript(()=>{
-   const storage=JSON.parse(localStorage.getItem('mock-storage')||'{}');
-   globalThis.__storage=storage;globalThis.__roomMessages=[];globalThis.chrome={storage:{local:{get:async key=>({[key]:storage[key]}),set:async data=>{Object.assign(storage,data);localStorage.setItem('mock-storage',JSON.stringify(storage));}}},runtime:{sendMessage(m,cb){__roomMessages.push(m);cb?.(m.type==='INSPECT_DERIV_VIEWS'?{ok:true,symbols:['VOL_11'],internalChartsSupported:false,scope:'browser-urls-only'}:{ok:true,mode:'deriv-workspace',message:'Deriv activado sin cambiar sus gráficos. Selecciona el gráfico interno manualmente.'});}}};
+  await context.addInitScript(()=>{
+   if(!localStorage.getItem('mock-storage'))localStorage.setItem('mock-storage',JSON.stringify({deriv_scanner_settings_v1:{requestsPerMinute:120,concurrency:2,refreshSeconds:180}}));
+   const read=()=>JSON.parse(localStorage.getItem('mock-storage')||'{}'),listeners=[];
+   Object.defineProperty(globalThis,'__storage',{get:read});globalThis.__roomMessages=[];
+   const notify=(old,data)=>{const changes={};for(const key of Object.keys(data))changes[key]={oldValue:old[key],newValue:data[key]};listeners.forEach(fn=>fn(changes,'local'));};
+   addEventListener('storage',e=>{if(e.key==='mock-storage')notify(JSON.parse(e.oldValue||'{}'),JSON.parse(e.newValue||'{}'));});
+   globalThis.chrome={storage:{onChanged:{addListener:fn=>listeners.push(fn)},local:{get:async key=>({[key]:read()[key]}),set:async data=>{const old=read();localStorage.setItem('mock-storage',JSON.stringify({...old,...data}));notify(old,data);}}},runtime:{sendMessage(m,cb){__roomMessages.push(m);cb?.(m.type==='INSPECT_DERIV_VIEWS'?{ok:true,symbols:['VOL_11'],internalChartsSupported:false,scope:'browser-urls-only'}:{ok:true,mode:'deriv-workspace',message:'Deriv activado sin cambiar sus gráficos. Selecciona el gráfico interno manualmente.'});}}};
   });
-  let historyCalls=0;
-  await page.routeWebSocket('wss://api.derivws.com/**',ws=>{
+  let historyCalls=0,directional=false,apiOffset=0;const apiNow=()=>Date.now()+apiOffset;
+  await context.routeWebSocket('wss://api.derivws.com/**',ws=>{
+   socketCount++;activeSockets++;maxActiveSockets=Math.max(maxActiveSockets,activeSockets);ws.onClose(()=>activeSockets--);
    ws.onMessage(raw=>{
     const m=JSON.parse(raw);sent.push(m);const respond=data=>ws.send(JSON.stringify({req_id:m.req_id,...data}));
-    if(m.time)respond({time:Math.floor(Date.now()/1000)});
+    if(m.time)respond({time:Math.floor(apiNow()/1000)});
     else if(m.active_symbols)respond({active_symbols:Array.from({length:12},(_,i)=>({underlying_symbol:i?'VOL_'+i:'1HZ10V',underlying_symbol_name:'Volatility '+i,market:'synthetic_index',submarket:'random_index',underlying_symbol_type:'stockindex'}))});
-    else if(m.ticks_history){historyCalls++;const end=m.end==='latest'?Math.floor(Date.now()/60000)*60:Math.floor(Number(m.end)/60)*60;const candles=Array.from({length:m.count},(_,i)=>{const close=100+Math.sin((end/60-m.count+1+i)/4)*2;return {epoch:end-(m.count-1-i)*60,open:close,high:close+.5,low:close-.5,close};});respond({candles});}
-    else if(m.ticks)setTimeout(()=>{respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101}});for(let i=1;i<=60;i++)setTimeout(()=>respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(Date.now()/1000),quote:101+i/10}}),i*100);},2100);
+    else if(m.ticks_history){historyCalls++;const end=m.end==='latest'?Math.floor(apiNow()/60000)*60:Math.floor(Number(m.end)/60)*60;const candles=Array.from({length:m.count},(_,i)=>{const close=directional?100+(end/60-m.count+1+i)*.02:100+Math.sin((end/60-m.count+1+i)/4)*2;return {epoch:end-(m.count-1-i)*60,open:directional?close-.015:close,high:directional?close+.001:close+.5,low:directional?close-.016:close-.5,close};});respond({candles});}
+    else if(m.ticks)setTimeout(()=>{respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(apiNow()/1000),quote:101}});for(let i=1;i<=60;i++)setTimeout(()=>respond({subscription:{id:'tick'+m.req_id},tick:{symbol:m.ticks,epoch:Math.floor(apiNow()/1000),quote:101+i/10}}),i*100);},2100);
     else if(m.forget)respond({forget:1});
     else if(m.ping)respond({ping:'pong'});
     else throw new Error('Unexpected API operation');
@@ -42,8 +47,22 @@ const http=require('node:http');
   assert.match(await page.locator('#log').textContent(),/Hora Deriv sincronizada/);
   await page.waitForFunction(()=>document.querySelector('#count').textContent.includes('Finalizado'),{},{timeout:15000});
   assert.match(await page.locator('#count').innerText(),/12\/12 · 0 errores/);
-  assert.equal(await page.locator('#results .room-card').count(),6);assert.equal(historyCalls,36);
+  assert.equal(await page.locator('#results .room-card').count(),6);assert.equal(historyCalls,18);
   assert.equal(await page.locator('#auto').isChecked(),false);
+  assert.equal(await page.locator('#results').isVisible(),false);assert.ok(await page.locator('.dynamic-card:visible').count()<=7);
+  await page.click('#toggleFavorites');
+  assert.equal(await page.evaluate(()=>MARKET_SESSION.owner),true);
+  assert.ok(await page.locator('#dynamicCards .dynamic-card').count()<=7);
+  const mirror=await context.newPage();mirror.on('pageerror',error=>errors.push(error.message));
+  await mirror.goto('http://127.0.0.1:'+server.address().port+'/panel.html?view=full');
+  await mirror.waitForFunction(()=>!MARKET_SESSION.owner&&document.querySelectorAll('#marketRows tr').length===12);
+  assert.equal(socketCount,1);
+  await mirror.selectOption('#marketFamily','UNKNOWN');assert.equal(await mirror.locator('#marketRows tr').count(),11);await mirror.selectOption('#marketFamily','');
+  await mirror.check('#onlyLive');assert.equal(await mirror.locator('#marketRows tr').count(),0);await mirror.uncheck('#onlyLive');
+  await mirror.fill('#marketSearch','Volatility 11');assert.equal(await mirror.locator('#marketRows tr').count(),1);await mirror.fill('#marketSearch','');
+  await mirror.locator('#advanced > summary').click();
+  const remoteDownload=mirror.waitForEvent('download');await mirror.click('#scannerExport');
+  assert.equal((await remoteDownload).suggestedFilename(),'deriv-scanner-prospectivo.csv');
   await page.evaluate(async()=>{
    cancelScan=false;
    await registerForwardItem({symbol:'1HZ10V',name:'Simulated signal',direction:'SUBE',close:100,lastTime:Math.floor(closedThrough()/60)*60-60,score:70},1);
@@ -63,12 +82,13 @@ const http=require('node:http');
   await page.evaluate(()=>{
    globalThis.__realReaderView=ADAPT_UI.view;globalThis.__watchWasOn=watchOn;if(watchOn)stopWatch();globalThis.__testRow=results.find(r=>r.symbol===ROOM_UI.selected[0]);globalThis.__oldRow={direction:__testRow.direction,lastTime:__testRow.lastTime,emittedAt:__testRow.emittedAt};
    const at=serverNow();__testRow.direction='BAJA';__testRow.lastTime=at-60;__testRow.emittedAt=at;
-   globalThis.__presentationFixture={reading:{sourceCloseAt:at,emittedAt:serverNow(),expiresAt:at+60,direction:'ESPERAR'},observed:{sourceCloseAt:at,trend:'ALCISTA'}};
+   globalThis.__presentationFixture={reading:{...__realReaderView(__testRow.symbol).reading,sourceCloseAt:at,emittedAt:serverNow(),expiresAt:at+60,direction:'ESPERAR'},observed:{sourceCloseAt:at,trend:'ALCISTA'}};
    ADAPT_UI.view=code=>code===__testRow.symbol?__presentationFixture:__realReaderView(code);ROOM_UI.render(results);
   });
   assert.match(await page.locator('#results .room-card').first().innerText(),/Tendencia observada: ALCISTA/);
   assert.match(await page.locator('#results .room-card').first().innerText(),/SIN CONFIRMACIÓN/);
   assert.match(await page.locator('#results .room-card').first().innerText(),/Métodos en desacuerdo/);
+  await mirror.locator('section[aria-label="Comparador de estrategias"] summary').click();await mirror.selectOption('#cmpMode','ticks');await mirror.click('#cmpTicks');await mirror.waitForFunction(()=>document.querySelector('#cmpStatus').textContent.includes('insuficientes'));assert.equal(socketCount,1);
   await page.locator('#advanced > summary').click();
   await page.locator('section[aria-label="Lector inteligente de gráficos"] > details > summary').click();
   await page.waitForFunction(()=>document.querySelectorAll('#readerCards .reader-detail').length===6);
@@ -97,6 +117,7 @@ const http=require('node:http');
   await page.locator('.selection-row button').first().click();
   await page.waitForFunction(()=>ROOM_UI.selected.includes('VOL_7')&&!ROOM_UI.selected.includes('1HZ10V'));
   assert.equal(await page.locator('#results .room-card').count(),6);
+  await mirror.waitForFunction(()=>ROOM_UI.selected.includes('VOL_7'));
   await page.click('#importTabs');await page.waitForFunction(()=>document.querySelector('#syncReference').textContent.includes('VOL_11'));
   assert.equal(await page.locator('#results .room-card').count(),6);
   assert.equal(await page.evaluate(()=>ROOM_UI.selected.includes('VOL_11')),false);
@@ -129,13 +150,27 @@ const http=require('node:http');
   const readerDownloadPromise=page.waitForEvent('download');await page.click('#readerExport');const readerDownload=await readerDownloadPromise;const readerFile=path.join(output,'reader.csv');await readerDownload.saveAs(readerFile);assert.match(await fs.readFile(readerFile,'utf8'),/LECTOR_PROSPECTIVO/);
   const cmpDownloadPromise=page.waitForEvent('download');await page.click('#cmpExport');const cmpDownload=await cmpDownloadPromise;
   const cmpFile=path.join(output,'comparator.csv');await cmpDownload.saveAs(cmpFile);assert.match(await fs.readFile(cmpFile,'utf8'),/PROSPECTIVO_FLUJO/);
+  await mirror.close();
   // Reload checks selection and records using a persistent Chrome-storage mock.
   await page.reload();await page.waitForFunction(()=>document.querySelector('#forwardCount').textContent.includes('pendientes'));
   await page.waitForFunction(()=>document.querySelectorAll('#results .room-card').length===6);
   assert.equal(await page.locator('#primaryMethod').inputValue(),'adaptive');
   assert.equal(await page.locator('#advanced').getAttribute('open'),null);
   assert.equal(await page.locator('article.room-card').count(),6);
+  await page.locator('#advanced > summary').click();await page.check('#scannerCollect');directional=true;apiOffset=Math.floor(Date.now()/60000)*60000+10000-Date.now();
+  await page.click('#connect');await page.waitForFunction(()=>apiReady&&!scanning);
+  await page.waitForFunction(()=>__storage.deriv_scanner_research_v1?.groups.some(g=>g.entries.filter(e=>e.source==='SCANNER_PROSPECTIVO').every(e=>e.entryTime)),{},{timeout:20000});
+  const scannerDownloadPromise=page.waitForEvent('download');await page.click('#scannerExport');const scannerDownload=await scannerDownloadPromise;const scannerFile=path.join(output,'scanner.csv');await scannerDownload.saveAs(scannerFile);assert.match(await fs.readFile(scannerFile,'utf8'),/SCANNER_PROSPECTIVO/);
+  // Handover preserves the active session intention and never overlaps two engines.
+  const successor=await context.newPage();successor.on('pageerror',error=>errors.push(error.message));
+  await successor.goto('http://127.0.0.1:'+server.address().port+'/panel.html?view=full');
+  await successor.waitForFunction(()=>!MARKET_SESSION.owner&&Boolean(MARKET_SESSION.last));
+  const before=socketCount;await page.close();
+  await successor.waitForFunction(()=>MARKET_SESSION.owner&&apiReady,{},{timeout:10000});
+  assert.equal(socketCount,before+1);assert.equal(maxActiveSockets,1);assert.equal(await successor.evaluate(()=>ROOM_UI.selected.length),6);
+  await successor.waitForFunction(()=>__storage.deriv_scanner_research_v1?.groups.some(g=>g.entries.filter(e=>e.source==='SCANNER_PROSPECTIVO').every(e=>e.status==='INCOMPLETA')));
+  await successor.close();
   assert.deepEqual(errors,[]);assert.equal(sent.some(m=>m.buy||m.sell||m.proposal||m.authorize),false);
-  console.log('Browser smoke PASS: actual DOM, public-API mock, scan, prospective entry with Web Lock, CSV, reload; no page errors.');
+  console.log('Browser smoke PASS: two views, single active WebSocket, owner handover, mirrored CSV/comparator, shared favorites, table filters, legacy and v2 delayed prospective entries/interruption/CSV, reload; no page errors.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));await fs.rm(output,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

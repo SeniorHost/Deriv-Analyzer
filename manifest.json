@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Deriv Analyzer — Demo Research",
-  "version": "1.9.0",
+  "name": "Deriv Analyzer — Investigación multiactivo",
+  "version": "2.0.0",
   "description": "Escáner experimental de velas e indicadores de Deriv. No ejecuta operaciones.",
   "permissions": [
     "sidePanel",

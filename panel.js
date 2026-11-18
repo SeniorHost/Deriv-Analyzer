@@ -162,7 +162,7 @@ async function registerForwardItem(r,h=Number($('horizon').value),socket=ws){
   });
   assertSession(socket);if(cancelScan)return;
   const t=FORWARD.currentTick(m,serverNow(),Math.ceil(clockAnchor.uncertaintyMs/1000));
-  if(!t.ok || t.epoch<closedAt){
+  if(!t.ok || t.epoch<closedAt || t.epoch-closedAt>90){
    forwardStats.quote++;explainForward();log(`Seguimiento ${r.symbol}: tick rechazado (${t.reason||'anterior al cierre usado'}).`);return;
   }
   // Tiempo y precio observados después de evaluar el indicador. Nunca se inventa una entrada pasada.
@@ -234,8 +234,7 @@ function exportForward(){
  const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';
  const iso=v=>Number.isSafeInteger(v)&&Number.isFinite(new Date(v*1000).getTime())?new Date(v*1000).toISOString():'';
  const rows=forwardRecords.map(value=>{const r=value&&typeof value==='object'?value:{};return [r.symbol,r.name,r.recordedAt,iso(r.entryTime),iso(r.exitTime),r.direction,r.direction==='SUBE'?'Rise':'Fall',r.entry,r.exit,r.status,r.score,r.horizon,r.priceBasis||'CANDLE_CLOSE_LEGACY',iso(r.sourceCloseTime),iso(r.exitQuoteTime),r.quoteLagSeconds,r.checkedAt,r.note].map(esc).join(',');});
- const url=URL.createObjectURL(new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));
- const a=document.createElement('a');a.href=url;a.download='deriv-seguimiento-prospectivo-v19-'+Date.now()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+ downloadCsv(new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}),'deriv-seguimiento-prospectivo-v19-'+Date.now()+'.csv');
 }
 // Solo dentro del panel abierto. No hay vigilancia remota ni escaneos con el navegador cerrado.
 function updateWatchUI(){
@@ -246,9 +245,11 @@ function updateWatchUI(){
 }
 function clearWatchTimer(){if(watchTimer!==null)clearTimeout(watchTimer);watchTimer=null;}
 function stopWatch(){
+ if(typeof SCANNER_UI!=='undefined')SCANNER_UI.cancel();
  watchOn=false;clearWatchTimer();stopReconnect();reconnectAttempts=0;updateWatchUI();
 }
 function scheduleWatch(){
+ if(typeof SCANNER_UI!=='undefined'){SCANNER_UI.schedule();return;}
  clearWatchTimer();
  if(!watchOn||!apiReady||!clockUsable()||!ws||ws.readyState!==WebSocket.OPEN)return;
  const ms=60000-(serverNowMs()%60000)+8000; // 8 s después del siguiente cierre en hora del servidor.
@@ -279,7 +280,20 @@ function forgetSubscription(socket,id){
  if(!id||ws!==socket||socket.readyState!==WebSocket.OPEN)return;
  request({forget:id},5000).catch(e=>{if(ws===socket)log('No se pudo cancelar suscripción: '+e.message);});
 }
-function request(data,timeout=16000,accept=null,abortSignal=null){return new Promise((resolve,reject)=>{
+async function request(data,timeout=16000,accept=null,abortSignal=null){
+ let effectiveSignal=abortSignal;
+ if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner)throw new Error('La vista de control es la única que consulta la API');
+ if(typeof SCANNER_UI!=='undefined'&&!data.ping&&!data.time&&!data.forget&&!data.active_symbols){
+  effectiveSignal=abortSignal||(data.ticks_history?SCANNER_UI.historySignal:null);await SCANNER_UI.budget.take(effectiveSignal);if(effectiveSignal?.aborted)throw new Error('Cancelado antes de solicitar');
+ }
+ return requestNow(data,timeout,accept,effectiveSignal);
+}
+let exportRedirect=null;
+function downloadCsv(blob,name){
+ if(exportRedirect&&name.startsWith(exportRedirect.prefix)){void blob.text().then(text=>exportRedirect?.resolve({text,name}));return;}
+ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+}
+function requestNow(data,timeout=16000,accept=null,abortSignal=null){return new Promise((resolve,reject)=>{
  const socket=ws;
  if(abortSignal?.aborted)return reject(new Error('Solicitud cancelada'));
  if(!socket||socket.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
@@ -306,6 +320,7 @@ function disconnect(socket,reason){
  state('Desconectada');$('detail').textContent=reason;updateConnectionUI();log(reason);scheduleReconnect();
 }
 function connect(isRetry=false){
+ if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner){void MARKET_SESSION.command({type:'click',id:'connect'}).catch(e=>log(e.message));return;}
  stopReconnect();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
  apiReady=false;symbols=[];invalidateClock();cancelScan=true;
  if(ws){
@@ -326,7 +341,7 @@ function connect(isRetry=false){
   try{
    await syncServerClock(socket);assertSession(socket);
    const m=await request({active_symbols:'brief'});assertSession(socket);
-   symbols=(Array.isArray(m.active_symbols)?m.active_symbols:[]).map(normalizeSymbol).filter(Boolean);
+   symbols=normalizeCatalog(m.active_symbols);
    if(!symbols.length)throw new Error('El catálogo público está vacío');
    apiReady=true;state('Conectada',true);updateConnectionUI();
    $('detail').textContent=`${symbols.length} símbolos obtenidos por API pública. No requiere contraseña.`;
@@ -359,6 +374,7 @@ function normalizeSymbol(item){
  if(typeof code!=='string' || !/^\w{2,30}$/.test(code))return null;
  return {...item,symbol:code,display_name:typeof name==='string'?name:code};
 }
+function normalizeCatalog(raw){if(!Array.isArray(raw))throw new Error('Catálogo público inválido');return [...new Map(raw.map(normalizeSymbol).filter(Boolean).map(s=>[s.symbol,s])).values()];}
 function symbolType(s){const x=[s.market,s.market_display_name,s.submarket,s.submarket_display_name,s.subgroup,s.underlying_symbol_type,s.display_name,s.symbol].join(' ').toLowerCase();
  if(/synthetic|derived|volatility|índice de volatilidad|indices de volatilidad/.test(x))return 'synthetic';
  if(/forex|major pairs|minor pairs|currency|fx/.test(x))return 'forex';return 'other';}
@@ -440,6 +456,7 @@ async function loadHistory(symbol,socket=ws){
 
 let cancelScan=false;
 async function scan(single=false){
+ if(typeof SCANNER_UI!=='undefined')return SCANNER_UI.run(single);
  if(scanning){log('Ya hay un escaneo en curso.');return;}
  if(!apiReady||!clockUsable()){updateConnectionUI();log('Conecta y sincroniza la API antes de escanear.');return;}
  const socket=ws;
@@ -528,7 +545,7 @@ function exportCsv(){if(!results.length){log('Primero ejecuta un escaneo.');retu
  const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';
  const data=results.map(x=>[x.symbol,x.name,x.direction,x.score,x.samples,x.pages,x.close,x.lastTime,x.back?.n,x.back?.win,x.back?.lose,x.back?.tie,x.back?.rate,x.back?.ciLow,x.back?.ciHigh,x.back?.enough,x.error].map(esc).join(','));
  const blob=new Blob([cols.join(',')+'\n'+data.join('\n')],{type:'text/csv;charset=utf-8'});
- const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='deriv-analyzer-demo-'+Date.now()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+ downloadCsv(blob,'deriv-analyzer-demo-'+Date.now()+'.csv');
 }
 function exportTrades(){
  if(!allTrades.length){log('No hay señales individuales para exportar.');return;}
@@ -536,7 +553,7 @@ function exportTrades(){
  const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';
  const data=allTrades.map(t=>[t.symbol,new Date(t.entryTime*1000).toISOString(),new Date(t.exitTime*1000).toISOString(),t.direction,t.entry,t.exit,t.result,t.horizon,t.score].map(esc).join(','));
  const blob=new Blob([cols.join(',')+'\n'+data.join('\n')],{type:'text/csv;charset=utf-8'});
- const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='deriv-senales-validacion-'+Date.now()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+ downloadCsv(blob,'deriv-senales-validacion-'+Date.now()+'.csv');
 }
 $('tradesExport').addEventListener('click',exportTrades);
 $('connect').addEventListener('click',()=>connect(false));

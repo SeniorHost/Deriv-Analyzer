@@ -2,7 +2,7 @@
 const CMP_UI=(()=>{
  let state=null,queue=Promise.resolve(),busy=false,disposed=false,history=new Map(),tickHistory=new Map();const active=new Map();
  const note=text=>{$('cmpStatus').textContent=text;};
- const ready=(async()=>{try{const locks=await navigator.locks.query();const live=locks.held.map(lock=>lock.name).filter(name=>name.startsWith('deriv-comparator-stream:')).map(name=>name.slice('deriv-comparator-stream:'.length));state=COMPARATOR.restore((await chrome.storage.local.get(COMPARATOR.KEY))[COMPARATOR.KEY],live);$('cmpEnable').checked=state.enabled;await save();render();}catch(e){state=null;note(e.message);}})();
+ const ready=(async()=>{try{if(typeof MARKET_SESSION!=='undefined')await MARKET_SESSION.ready;const locks=await navigator.locks.query();const live=locks.held.map(lock=>lock.name).filter(name=>name.startsWith('deriv-comparator-stream:')).map(name=>name.slice('deriv-comparator-stream:'.length));state=COMPARATOR.restore((await chrome.storage.local.get(COMPARATOR.KEY))[COMPARATOR.KEY],live);$('cmpEnable').checked=state.enabled;if(typeof MARKET_SESSION==='undefined'||MARKET_SESSION.owner)await save();render();}catch(e){state=null;note(e.message);}})();
  function save(){if(!state)return Promise.reject(new Error('Comparador no restaurado'));const snapshot=structuredClone(state);const p=queue.catch(()=>{}).then(()=>navigator.locks.request(COMPARATOR.KEY,async()=>{
   const value=(await chrome.storage.local.get(COMPARATOR.KEY))[COMPARATOR.KEY];
   if(value!==undefined&&(value.version!==1||!Array.isArray(value.groups)))throw new Error('Formato desconocido; no se sobrescribirá');
@@ -34,7 +34,7 @@ const CMP_UI=(()=>{
  function durations(){const el=$('cmpDuration');el.replaceChildren();for(const n of $('cmpMode').value==='ticks'?COMPARATOR.TICKS:COMPARATOR.TIME){const o=document.createElement('option');o.value=String(n);o.textContent=n+($('cmpMode').value==='ticks'?' ticks':' min');el.append(o);}if($('cmpMode').value==='time')el.value='5';render();}
  function onHistory(symbol,c,t){history.set(symbol,{c,t,updated:serverNow()});if(history.size>12)history.delete(history.keys().next().value);if($('cmpAsset').options.length!==symbols.length)assets();render();}
  async function collect(row){
-  await ready;if(!state?.enabled||disposed||!ROOM_UI.selected.includes(row.symbol)||!['SUBE','BAJA'].includes(row.direction)||!COMPARATOR.allowed(state.groups,row))return;
+  await ready;if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner)return;if(!state?.enabled||disposed||!ROOM_UI.selected.includes(row.symbol)||!['SUBE','BAJA'].includes(row.direction)||!COMPARATOR.allowed(state.groups,row))return;
   if(active.size>=3){note('Señal de '+row.symbol+' no recopilada: límite de tres flujos. No se reconstruirá una entrada pasada.');return;}
   let now;try{now=serverNow();if(now-row.lastTime-60<0||now-row.lastTime-60>60)return;}catch{return;}
   if(active.has(row.symbol))return;const socket=ws,signalAt=Math.ceil((serverNowMs()+clockAnchor.uncertaintyMs)/1000);active.set(row.symbol,null);let group=null,lastSave=0,lastSettled=0;const controller=new AbortController();let watchdog=setTimeout(()=>controller.abort(),9000);
@@ -54,19 +54,20 @@ const CMP_UI=(()=>{
  }
  async function signal(row){try{await navigator.locks.request('deriv-comparator-stream:'+row.symbol,{ifAvailable:true},async lock=>{if(lock)await collect(row);});}catch(e){note('No se pudo reservar el flujo: '+e.message);}}
  $('cmpEnable').addEventListener('change',async()=>{await ready;if(!state)return;$('cmpEnable').disabled=true;const previous=state.enabled;state.enabled=$('cmpEnable').checked;try{await save();note(state.enabled?'Recopilación activa para señales nuevas; máximo tres flujos, sin solapamiento por activo durante 10 min.':'No se crearán nuevas entradas; los flujos ya iniciados terminan su evaluación.');}catch(e){state.enabled=previous;$('cmpEnable').checked=previous;note(e.message);}finally{$('cmpEnable').disabled=false;}});
- $('cmpMode').addEventListener('change',durations);$('cmpAsset').addEventListener('change',render);$('cmpDuration').addEventListener('change',render);
- $('cmpTicks').addEventListener('click',async()=>{
-  if(busy)return;busy=true;$('cmpTicks').disabled=true;const code=$('cmpAsset').value;
+ $('cmpMode').addEventListener('change',durations);$('cmpAsset').addEventListener('change',()=>{if(typeof MARKET_SESSION!=='undefined'){const code=$('cmpAsset').value;void MARKET_SESSION.command({type:'cmpHistory',symbol:code}).then(value=>{CMP_UI.hydrate(value.cmp);note(value.status);}).catch(e=>note(e.message));}else render();});$('cmpDuration').addEventListener('change',render);
+ async function queryTicks(code=$('cmpAsset').value){
+  if(busy)return;busy=true;$('cmpTicks').disabled=true;
   try{if(!history.has(code))throw new Error('Primero escanea el activo');if(tickHistory.has(code)&&serverNow()-tickHistory.get(code).updated<60){render();return;}const response=await request({ticks_history:code,end:'latest',count:1000,style:'ticks'},12000);tickHistory.set(code,{ticks:COMPARATOR.ticks(response),updated:serverNow()});if(tickHistory.size>12)tickHistory.delete(tickHistory.keys().next().value);note('Ventana de hasta 1.000 ticks reales. Cobertura limitada; no es un historial completo.');render();}catch(e){note('Datos insuficientes: '+e.message);}finally{busy=false;$('cmpTicks').disabled=false;}
- });
+ }
+ $('cmpTicks').addEventListener('click',async()=>{if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner){try{const value=await MARKET_SESSION.command({type:'cmpHistory',symbol:$('cmpAsset').value,ticks:true});CMP_UI.hydrate(value.cmp);note(value.status);}catch(e){note(e.message);}return;}await queryTicks();});
  $('cmpExport').addEventListener('click',()=>{
   const cols=['asset','mode','duration','direction','signal_time','entry_time','entry_price','target_time','exit_time','exit_price','result','evaluation_source','reason'];
   const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';const iso=t=>Number.isFinite(t)?new Date(t*1000).toISOString():'';
   const rows=(state?.groups||[]).flatMap(g=>g.evaluations.map(r=>[g.symbol,r.mode,r.duration,g.direction,iso(g.signalAt),iso(g.entryTime),g.entry,iso(r.target),iso(r.exitTime),r.exit,r.status,g.source,r.reason].map(esc).join(',')));
   const code=$('cmpAsset').value,mode=$('cmpMode').value,duration=Number($('cmpDuration').value),h=history.get(code);
   if(h){const retro=mode==='time'?VALIDATION.run(h.c,h.t,duration,code).records:tickHistory.has(code)?COMPARATOR.tickBacktest(h.c,h.t,duration,tickHistory.get(code).ticks,code):[];for(const r of retro)rows.push([code,mode,duration,r.direction,iso(r.signalTime||r.entryTime),iso(r.entryTime),r.entry,mode==='time'?iso(r.exitTime):'',iso(r.exitTime),r.exit,r.result,mode==='time'?'RETROSPECTIVO_CIERRE':'RETROSPECTIVO_TICKS','Referencia histórica no ejecutable'].map(esc).join(','));}
-  const url=URL.createObjectURL(new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='deriv-comparador.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+  downloadCsv(new Blob([cols.join(',')+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8'}),'deriv-comparador.csv');
  });
  window.addEventListener('beforeunload',()=>{disposed=true;});
- durations();return {ready,onHistory,signal,render};
+ durations();return {ready,onHistory,signal,render,queryTicks,snapshot(){return structuredClone({state,history:[...history],tickHistory:[...tickHistory]});},hydrate(value){if(!value)return;state=value.state;history=new Map(value.history);tickHistory=new Map(value.tickHistory);assets();},async reload(){state=COMPARATOR.restore((await chrome.storage.local.get(COMPARATOR.KEY))[COMPARATOR.KEY]);$('cmpEnable').checked=state.enabled;render();}};
 })();
