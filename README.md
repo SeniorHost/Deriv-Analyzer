@@ -1,8 +1,9 @@
 # Deriv Analyzer v2.0 — escáner inteligente multiactivo
 
-Candidata experimental en `feature/intelligent-market-scanner`, basada en `feature/simple-chart-reader` (`3725728`). No ejecuta operaciones y no existe ventaja financiera demostrada.
+Candidata experimental en `feature/scanner-25-fast-navigation`, basada en `feature/intelligent-market-scanner` (`166dd52`). No ejecuta operaciones y no existe ventaja financiera demostrada.
 
-- **Mejores señales disponibles**: hasta siete tarjetas dinámicas con tendencia, RISE/FALL/SIN CONFIRMACIÓN, método versionado, explicación, vigencia, antigüedad y evidencia. Las tarjetas confirmadas conservan su posición mientras sean válidas; una vela caducada no se reactiva.
+- **Mejores señales disponibles**: hasta 25 tarjetas dinámicas con tendencia, RISE/FALL/SIN CONFIRMACIÓN, método versionado, explicación, vigencia, antigüedad y evidencia. Cada análisis se publica antes de esperar el seguimiento prospectivo o terminar la tanda. Una señal nueva reemplaza primero una tarjeta amarilla; las confirmadas conservan su posición mientras sean válidas; una vela caducada no se reactiva.
+- **Colores del radar**: tarjeta verde RISE vigente, roja FALL vigente, amarilla sin confirmación, gris pendiente/caducada/antigua/error. Se actualizan nodos por símbolo sin reconstruir la cuadrícula ni consultar la API para pintar.
 - **Mi sala · favoritos**: selección manual independiente, inicialmente seis y máximo siete, con añadir/quitar/reemplazar/reordenar. Se conserva la selección anterior completa al migrar, incluidos los símbolos fuera del límite activo; la clave anterior no se borra. El escáner y la detección de pestañas nunca añaden favoritos por su cuenta.
 - **Vista completa/compacta** y **Abrir en ventana**: tabla del catálogo con búsqueda y filtros; una sola vista controla la conexión pública y las demás reflejan resultados y envían controles. Sin vistas abiertas no hay monitoreo.
 - Recorrido progresivo de todas las familias compatibles del catálogo, presupuesto global predeterminado de 36 solicitudes de datos/60 s, dos trabajadores, caché incremental y reintentos limitados. Muestra progreso real y datos antiguos. No descarga 2.400 velas por activo cada minuto.

@@ -3,9 +3,26 @@ const MARKET_CORE=(()=>{
  const FAVORITES_KEY='deriv_scanner_favorites_v1',SNAPSHOT_KEY='deriv_scanner_snapshot_v1';
  function favorites(value){if(!Array.isArray(value)||value.some(s=>typeof s!=='string'||!/^[A-Za-z0-9_]{2,30}$/.test(s)))throw new Error('Favoritos inválidos');const unique=[...new Set(value)];if(unique.length>7)throw new Error('Mi sala admite como máximo siete favoritos');return unique;}
  function migrate(value){if(value!==undefined&&(!value||!Array.isArray(value.selection)))throw new Error('Selección anterior desconocida; no se sobrescribirá');const legacy=value?ROOM.selection(value.selection):null;return {version:1,selection:legacy?.slice(0,7)??null,legacySelection:legacy,overflow:legacy?.slice(7)??[],seen:value?.seen||[]};}
- function state(row,now,connected=true){if(!connected||!Number.isFinite(now))return 'connection';if(row.pending)return 'pending';if(row.error)return row.error==='stale'?'stale':'error';if(row.closed)return 'closed';if(row.unsupported)return 'unsupported';if(!Number.isFinite(row.sourceCloseAt)||now-row.sourceCloseAt>120)return 'stale';if(row.revoked||now>=row.expiresAt)return 'expired';return ['SUBE','BAJA'].includes(row.direction)?'confirmed':'observation';}
+ function state(row,now,connected=true){if(!connected||!Number.isFinite(now))return 'connection';if(row.pending)return 'pending';if(row.error)return row.error==='stale'?'stale':'error';if(row.closed)return 'closed';if(row.unsupported)return 'unsupported';if(!Number.isFinite(row.sourceCloseAt)||row.sourceCloseAt>now||now-row.sourceCloseAt>120)return 'stale';if(row.revoked||now>=row.expiresAt)return 'expired';if(['SUBE','BAJA'].includes(row.direction))return Number.isFinite(row.emittedAt)&&row.emittedAt<=now&&Number.isFinite(row.expiresAt)&&row.expiresAt>row.emittedAt?'confirmed':'stale';return 'observation';}
  function update(previous,next,now){const value={...next};if(previous?.sourceCloseAt===next.sourceCloseAt){value.emittedAt=previous.emittedAt;value.expiresAt=previous.expiresAt;if(previous.revoked||now>=previous.expiresAt||previous.direction!=='ESPERAR'&&(next.direction!==previous.direction||next.method!==previous.method||next.closed||next.error)){value.revoked=true;value.direction='ESPERAR';value.reason='La hipótesis de esta vela perdió validez; espera una vela nueva';}}return value;}
  function rank(rows,previous,now,favs=[],connected=true){const byId=new Map(rows.map(r=>[r.symbol,r])),selected=[],used=new Set();const add=r=>{if(r&&!used.has(r.symbol)&&selected.length<7){selected.push(r);used.add(r.symbol);}};for(const code of previous){const r=byId.get(code);if(r&&state(r,now,connected)==='confirmed')add(r);}const confirmed=rows.filter(r=>state(r,now,connected)==='confirmed').sort((a,b)=>(b.prospectiveN||0)-(a.prospectiveN||0)||b.sourceCloseAt-a.sourceCloseAt||a.symbol.localeCompare(b.symbol));confirmed.forEach(add);for(const code of previous){const r=byId.get(code);if(r)add(r);}rows.filter(r=>['observation','expired'].includes(state(r,now,connected))).sort((a,b)=>Number(favs.includes(b.symbol))-Number(favs.includes(a.symbol))||b.sourceCloseAt-a.sourceCloseAt||a.symbol.localeCompare(b.symbol)).forEach(add);return selected;}
+ // Stable radar slots: newcomers consume yellow cards before gray ones, never live signals.
+ const RADAR_LIMIT=25;
+ function radar(rows,previous,now,favs=[],connected=true){
+  const byId=new Map(rows.map(r=>[r.symbol,r])),slots=[],used=new Set();
+  const add=r=>{if(r&&!used.has(r.symbol)&&slots.length<RADAR_LIMIT){slots.push(r);used.add(r.symbol);}};
+  for(const code of previous)add(byId.get(code));
+  const newcomers=[...byId.values()].filter(r=>!used.has(r.symbol)&&state(r,now,connected)==='confirmed')
+   .sort((a,b)=>(b.prospectiveN||0)-(a.prospectiveN||0)||b.sourceCloseAt-a.sourceCloseAt||a.symbol.localeCompare(b.symbol));
+  for(const row of newcomers){
+   if(slots.length<RADAR_LIMIT){add(row);continue;}
+   let index=slots.findIndex(r=>state(r,now,connected)==='observation');
+   if(index<0)index=slots.findIndex(r=>state(r,now,connected)!=='confirmed');
+   if(index>=0){used.delete(slots[index].symbol);slots[index]=row;used.add(row.symbol);}
+  }
+  [...byId.values()].filter(r=>!used.has(r.symbol)).sort((a,b)=>Number(state(b,now,connected)==='observation')-Number(state(a,now,connected)==='observation')||Number(favs.includes(b.symbol))-Number(favs.includes(a.symbol))||a.symbol.localeCompare(b.symbol)).forEach(add);
+  return slots;
+ }
  function economics(investment,payout,currency){if(!Number.isFinite(investment)||!Number.isFinite(payout)||investment<=0||payout<=investment||!/^[A-Z]{3}$/.test(currency||''))return {evaluable:false,label:'Rentabilidad no evaluable'};return {evaluable:true,breakEven:investment/payout,label:`Equilibrio teórico: ${(100*investment/payout).toFixed(2)}% de aciertos; no evalúa rentabilidad histórica`,source:'MANUAL_DECLARADO_NO_VERIFICADO'};}
  function feedResearch(group,tick,now){for(const e of group.entries)if(e.status==='ESPERANDO_ENTRADA'&&tick.epoch>=group.expiresAt){e.status='INCOMPLETA';e.reason='Señal caducada antes de la entrada retrasada';}return ADAPTIVE_FOLLOW.feed(group,tick,now);}
  function researchAllowed(groups,reading){return ADAPTIVE_FOLLOW.allowed(groups,reading)&&!groups.some(g=>g.symbol===reading.symbol&&(!ADAPTIVE_FOLLOW.done(g)||g.entries.some(e=>Number.isFinite(e.target)&&reading.emittedAt<=e.target)));}
@@ -16,7 +33,7 @@ const MARKET_CORE=(()=>{
   usage(){return this.timestamps.filter(at=>this.now()-at<60000).length;}
   async take(signal){for(;;){if(signal?.aborted)throw new Error('Cancelado antes de solicitar datos');const now=this.now();this.timestamps=this.timestamps.filter(at=>now-at<60000);this.used=this.timestamps.length;const delay=Math.max(0,this.nextAt-now,this.used>=this.limit?this.timestamps[0]+60000-now:0);if(delay){await this.wait(delay,signal);continue;}this.timestamps.push(now);this.used=this.timestamps.length;this.nextAt=now+this.spacing;return;}}
  }
- return {FAVORITES_KEY,SNAPSHOT_KEY,favorites,migrate,state,update,rank,economics,feedResearch,researchAllowed,researchStats,next,Budget};
+ return {FAVORITES_KEY,SNAPSHOT_KEY,favorites,migrate,state,update,rank,RADAR_LIMIT,radar,economics,feedResearch,researchAllowed,researchStats,next,Budget};
 })();
 const MARKET_STORE=(()=>{
  async function read(){return navigator.locks.request(MARKET_CORE.FAVORITES_KEY,async()=>{

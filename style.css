@@ -5,3 +5,11 @@
 .dynamic-card{border:1px solid #34485c;border-radius:10px;padding:14px;background:#14202b}.dynamic-card button{margin:4px}.dynamic-card .room-direction{font-size:17px}body[data-view="compact"] .full-only{display:none}.table-scroll{overflow:auto;max-height:440px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;padding:8px;border-bottom:1px solid #344150}input[type="search"],input[type="number"],#observedCurrency{background:#263747;border:1px solid #4a6075;color:#f4f7fb;border-radius:6px;padding:7px;max-width:100%}
 
 body[data-view="compact"]:not([data-favorites="true"]) #results{display:none}body[data-view="full"] .compact-only{display:none}
+/* Full-card states; transitions change color, never validity or position. */
+.dynamic-card{transition:background-color .18s ease,border-color .18s ease}
+.dynamic-card.radar-rise{background:#123d2b;border-color:#54e49c}
+.dynamic-card.radar-fall{background:#49242b;border-color:#ff7b85}
+.dynamic-card.radar-observation{background:#40351a;border-color:#efbf70}
+.dynamic-card.radar-inactive{background:#292f37;border-color:#7c8794}
+.radar-rise .room-direction{color:#88ffc0}.radar-fall .room-direction{color:#ffb0b5}.radar-observation .room-direction{color:#ffe099}.radar-inactive .room-direction{color:#c4cbd2}
+@media(prefers-reduced-motion:reduce){.dynamic-card{transition:none}}
