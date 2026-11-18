@@ -1,6 +1,6 @@
 # Instalación y revisión de la candidata v2.0
 
-Rama: `feature/intelligent-market-scanner`, base `feature/simple-chart-reader` (`3725728`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
+Rama: `feature/scanner-25-fast-navigation`, base `feature/intelligent-market-scanner` (`166dd52`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
 
 1. Descarga o cambia a la rama candidata en una carpeta local de revisión.
 2. En `chrome://extensions`, activa el modo de desarrollador y carga esa carpeta como extensión descomprimida. Si ya usas esa misma carpeta e ID, pulsa **Recargar** para conservar su almacenamiento. Copiar a otra carpeta puede generar otro ID y otro almacenamiento; exporta primero los CSV. No desinstales la extensión anterior para actualizarla.
@@ -11,7 +11,7 @@ Rama: `feature/intelligent-market-scanner`, base `feature/simple-chart-reader` (
 
 **Avanzado** incluye todos los CSV anteriores, el CSV prospectivo v2, comparador, selección del método original/adaptativo para favoritos, evaluación temporal y límites. El escáner dinámico identifica siempre su propio método. Los métodos y la recopilación anterior no cambian al alternar vistas.
 
-Presupuesto predeterminado: 36 solicitudes de datos por cualquier ventana de 60 s, separación mínima 200 ms y dos trabajadores. Configurable entre 12–120 y uno–tres. Reloj, ping, catálogo y cancelación de suscripciones quedan fuera del presupuesto de datos; no hay un WebSocket por activo. Favoritos/señales se revisitan cuando son elegibles, con prioridad, desde 60 s; otros desde 180 s. La cola y el presupuesto pueden añadir demora. Observa la antigüedad visible. Pausar/cancelar detiene nuevas tareas; no convierte en resueltos los seguimientos en curso.
+Presupuesto predeterminado: 36 solicitudes de datos por cualquier ventana de 60 s, separación mínima 200 ms y dos trabajadores. Configurable entre 12–120 y uno–tres. Reloj, ping, catálogo y cancelación de suscripciones quedan fuera del presupuesto de datos; no hay un WebSocket por activo. Favoritos/señales se revisitan cuando son elegibles, con prioridad, desde 60 s; otros desde 180 s. La cola y el presupuesto pueden añadir demora. El radar muestra hasta 25 activos y actualiza cada lectura al terminar, sin esperar el recorrido completo. Verde/rojo indican RISE/FALL vigentes; amarillo, ausencia de confirmación; gris, pendiente/caducidad/datos no fiables. Una señal nueva ocupa primero un lugar amarillo, sin desplazar confirmaciones vigentes. Observa la antigüedad visible. Pausar/cancelar detiene nuevas tareas; no convierte en resueltos los seguimientos en curso.
 
 El catálogo se renueva cada cinco minutos. No hay escaneo sin alguna vista abierta ni service worker mantenido artificialmente. Suspender el equipo puede interrumpir datos y reloj. Mantén una vista abierta para seguimiento; una instantánea guardada no equivale a un flujo vivo.
 
@@ -20,6 +20,7 @@ El catálogo se renueva cada cinco minutos. No hay escaneo sin alguna vista abie
 ```sh
 node --test tests/*.test.cjs
 node tests/browser-smoke.cjs
+node tests/radar-browser.cjs
 node tests/live-market-smoke.cjs
 ```
 

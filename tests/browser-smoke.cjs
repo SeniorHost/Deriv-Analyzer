@@ -9,7 +9,7 @@ const http=require('node:http');
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
  const server=http.createServer(async(req,res)=>{
   const name=req.url.split('?')[0];
-  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js','/simple-reader.js','/market-strategies.js','/market-core.js','/market-session.js','/scanner-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
+  if(!['/panel.html','/style.css','/panel.js','/forward.js','/indicators.js','/room.js','/room-ui.js','/comparator.js','/comparator-ui.js','/adaptive.js','/adaptive-follow.js','/adaptive-ui.js','/simple-reader.js','/market-strategies.js','/market-core.js','/radar-view.js','/market-session.js','/scanner-ui.js'].includes(name)){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');
   try{res.end(await fs.readFile(path.resolve(__dirname,'..'+name)));}catch{res.writeHead(500);res.end();}
  });
@@ -49,10 +49,10 @@ const http=require('node:http');
   assert.match(await page.locator('#count').innerText(),/12\/12 · 0 errores/);
   assert.equal(await page.locator('#results .room-card').count(),6);assert.equal(historyCalls,18);
   assert.equal(await page.locator('#auto').isChecked(),false);
-  assert.equal(await page.locator('#results').isVisible(),false);assert.ok(await page.locator('.dynamic-card:visible').count()<=7);
+  assert.equal(await page.locator('#results').isVisible(),false);assert.ok(await page.locator('.dynamic-card:visible').count()<=25);
   await page.click('#toggleFavorites');
   assert.equal(await page.evaluate(()=>MARKET_SESSION.owner),true);
-  assert.ok(await page.locator('#dynamicCards .dynamic-card').count()<=7);
+  assert.ok(await page.locator('#dynamicCards .dynamic-card').count()<=25);
   const mirror=await context.newPage();mirror.on('pageerror',error=>errors.push(error.message));
   await mirror.goto('http://127.0.0.1:'+server.address().port+'/panel.html?view=full');
   await mirror.waitForFunction(()=>!MARKET_SESSION.owner&&document.querySelectorAll('#marketRows tr').length===12);
