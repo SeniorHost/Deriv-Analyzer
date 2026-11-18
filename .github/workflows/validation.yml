@@ -2,9 +2,9 @@ name: Validate candidate
 
 on:
   push:
-    branches: [audit/v1.9-stability, feature/trading-room, feature/duration-comparator, feature/adaptive-chart-reader, feature/simple-chart-reader, feature/intelligent-market-scanner, feature/scanner-25-fast-navigation, feature/auto-demo-controlled, fix/auto-demo-responsive]
+    branches: [audit/v1.9-stability, feature/trading-room, feature/duration-comparator, feature/adaptive-chart-reader, feature/simple-chart-reader, feature/intelligent-market-scanner, feature/scanner-25-fast-navigation, feature/auto-demo-controlled, fix/auto-demo-responsive, feature/auto-demo-multi-monitor]
   pull_request:
-    branches: [main, audit/v1.9-stability, feature/trading-room, feature/duration-comparator, feature/adaptive-chart-reader, feature/simple-chart-reader, feature/intelligent-market-scanner, feature/scanner-25-fast-navigation, feature/auto-demo-controlled]
+    branches: [main, audit/v1.9-stability, feature/trading-room, feature/duration-comparator, feature/adaptive-chart-reader, feature/simple-chart-reader, feature/intelligent-market-scanner, feature/scanner-25-fast-navigation, feature/auto-demo-controlled, fix/auto-demo-responsive]
 
 permissions:
   contents: read

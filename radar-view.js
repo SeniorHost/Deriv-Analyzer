@@ -24,7 +24,7 @@ const RADAR_VIEW=(()=>{
    text(v.name,r.name||r.symbol);text(v.trend,(r.family||'Sin familia')+' · Tendencia: '+(r.trend||'sin datos'));
    text(v.signal,live?(r.direction==='SUBE'?'RISE':'FALL'):({observation:'SIN CONFIRMACIÓN',expired:'Caducada',stale:'Datos antiguos',closed:'Mercado cerrado',error:'Error de datos',connection:'Sin conexión fiable',unsupported:'Sin estrategia compatible',pending:'Pendiente de análisis'}[state]||'Sin datos'));
    text(v.method,r.method?r.method+'@'+r.version:'Sin método disponible');text(v.reason,r.reason||'Esperando velas cerradas y actualizadas.');
-   text(v.age,Number.isFinite(now)&&Number.isFinite(r.sourceCloseAt)?'Datos cerrados hace '+Math.max(0,Math.floor(now-r.sourceCloseAt))+' s':'Antigüedad no disponible');
+   text(v.age,Number.isFinite(now)&&Number.isFinite(r.sourceCloseAt)?(r.technical?.score?'Puntuación TA original '+r.technical.score.value+' (no probabilidad; no califica este método) · ':'')+'Datos cerrados hace '+Math.max(0,Math.floor(now-r.sourceCloseAt))+' s':'Antigüedad no disponible');
    hidden(v.emitted,!live);hidden(v.expires,!live);
    if(live){text(v.emitted,'Emitida '+new Date(r.emittedAt*1000).toLocaleTimeString());text(v.expires,Math.max(0,Math.floor(r.expiresAt-now))+' s de vigencia restantes');}
    text(v.evidence,`Evidencia experimental · ${r.prospectiveN||0} cohortes prospectivas evaluadas · sin ventaja demostrada`);

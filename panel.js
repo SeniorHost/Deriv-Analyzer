@@ -300,12 +300,12 @@ function requestNow(data,timeout=16000,accept=null,abortSignal=null){return new 
  const socket=ws;
  if(abortSignal?.aborted)return reject(new Error('Solicitud cancelada'));
  if(!socket||socket.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
- const req_id=++requestId;
+ const req_id=++requestId,began=Date.now();
  const finish=(error,message)=>{
   const p=pending.get(req_id);if(!p)return;
   pending.delete(req_id);clearTimeout(p.timer);abortSignal?.removeEventListener('abort',onAbort);
   if(p.subscriptionId)forgetSubscription(socket,p.subscriptionId);
-  if(error)reject(error);else resolve(message);
+  if(typeof SYSTEM_HEALTH!=='undefined'&&!accept&&!error&&Date.now()-began>1000)SYSTEM_HEALTH.record('REQUEST_LATE','Respuesta pública tardía',{durationMs:Date.now()-began,phase:Object.keys(data)[0]});if(typeof SYSTEM_HEALTH!=='undefined'&&error)SYSTEM_HEALTH.record(/timeout/i.test(error.message)?'REQUEST_TIMEOUT':'REQUEST_ERROR',error.message,{phase:Object.keys(data)[0],symbol:data.underlying_symbol||data.contracts_for||data.ticks||null});if(error)reject(error);else resolve(message);
  };
  const onAbort=()=>finish(new Error('Flujo cancelado o sin ticks recientes'));
  const timer=setTimeout(()=>finish(new Error('No llegó respuesta de API (timeout)')),timeout);
@@ -315,6 +315,7 @@ function requestNow(data,timeout=16000,accept=null,abortSignal=null){return new 
  });}
 function cleanPending(error){for(const p of [...pending.values()])p.finish(error);}
 function disconnect(socket,reason){
+ if(typeof SYSTEM_HEALTH!=='undefined')SYSTEM_HEALTH.record('SOCKET_LOST',reason,{critical:false});
  if(ws!==socket)return;
  ws=null;apiReady=false;symbols=[];invalidateClock();if(typeof AUTO_DEMO_UI!=='undefined')AUTO_DEMO_UI.connectionLost();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
  socket.onopen=socket.onclose=socket.onerror=socket.onmessage=null;
@@ -340,6 +341,7 @@ function connect(isRetry=false){
  catch(e){state('Error');log(e.message);scheduleReconnect();return;}
  connectionTimer=setTimeout(()=>disconnect(socket,'Tiempo agotado al abrir WebSocket'),12000);
  socket.onopen=async()=>{
+  if(typeof SYSTEM_HEALTH!=='undefined')SYSTEM_HEALTH.record('SOCKET_OPEN','WebSocket público conectado');
   if(ws!==socket)return;
   stopConnectionTimer();missedPings=0;state('Sincronizando...');startHeartbeat(socket);
   try{
