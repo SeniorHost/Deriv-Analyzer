@@ -1,6 +1,6 @@
-# Instalación y revisión de la candidata v2.0
+# Instalación y revisión de la candidata v2.1
 
-Rama: `feature/scanner-25-fast-navigation`, base `feature/intelligent-market-scanner` (`166dd52`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
+Rama: `feature/auto-demo-controlled`, base `feature/scanner-25-fast-navigation` (`abdfe29`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
 
 1. Descarga o cambia a la rama candidata en una carpeta local de revisión.
 2. En `chrome://extensions`, activa el modo de desarrollador y carga esa carpeta como extensión descomprimida. Si ya usas esa misma carpeta e ID, pulsa **Recargar** para conservar su almacenamiento. Copiar a otra carpeta puede generar otro ID y otro almacenamiento; exporta primero los CSV. No desinstales la extensión anterior para actualizarla.
@@ -15,13 +15,17 @@ Presupuesto predeterminado: 36 solicitudes de datos por cualquier ventana de 60 
 
 El catálogo se renueva cada cinco minutos. No hay escaneo sin alguna vista abierta ni service worker mantenido artificialmente. Suspender el equipo puede interrumpir datos y reloj. Mantén una vista abierta para seguimiento; una instantánea guardada no equivale a un flujo vivo.
 
+El monitor AUTO DEMO solo aparece en vista completa y comienza APAGADO. No solicita credenciales ni conecta cuentas. Antes de simular revisa y confirma saldo/límites virtuales. No existe habilitación de compras. Lee [uso del monitor](AUTO_DEMO_MONITOR.md) y [seguridad](AUTO_DEMO_SECURITY.md); una actualización/reinicio interrumpe el flujo virtual, conserva pendientes y no reanuda entradas.
+
 ## Verificación local
 
 ```sh
 node --test tests/*.test.cjs
 node tests/browser-smoke.cjs
 node tests/radar-browser.cjs
+node tests/auto-demo-browser.cjs
 node tests/live-market-smoke.cjs
+node tests/live-auto-demo.cjs
 ```
 
 Node 20 o posterior. La suite unitaria es offline y no instala dependencias. La prueba DOM requiere Playwright y Chromium (`CHROMIUM_PATH` permite elegir el ejecutable). La prueba pública opcional requiere Python y `websockets`, acceso al endpoint oficial y no usa autenticación ni opera. GitHub Actions ejecuta sintaxis, espacios y la suite unitaria en Node 20; no presupone acceso a Deriv.

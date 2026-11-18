@@ -281,6 +281,7 @@ function forgetSubscription(socket,id){
  request({forget:id},5000).catch(e=>{if(ws===socket)log('No se pudo cancelar suscripción: '+e.message);});
 }
 async function request(data,timeout=16000,accept=null,abortSignal=null){
+ guardFinancialRequest(data);
  let effectiveSignal=abortSignal;
  if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner)throw new Error('La vista de control es la única que consulta la API');
  if(typeof SCANNER_UI!=='undefined'&&!data.ping&&!data.time&&!data.forget&&!data.active_symbols){
@@ -293,7 +294,9 @@ function downloadCsv(blob,name){
  if(exportRedirect&&name.startsWith(exportRedirect.prefix)){void blob.text().then(text=>exportRedirect?.resolve({text,name}));return;}
  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
 }
+function guardFinancialRequest(data){if(typeof AUTO_DEMO==='undefined')return;const publicOperations=['ping','time','forget','active_symbols','ticks','ticks_history','proposal','contracts_for'],allowed=[...publicOperations,'subscribe','start','end','count','granularity','style','adjust_start_time','amount','basis','contract_type','currency','duration','duration_unit','underlying_symbol'];if(!data||Object.keys(data).some(k=>!allowed.includes(k))||publicOperations.filter(k=>Object.hasOwn(data,k)).length!==1)throw new Error(AUTO_DEMO.REASONS.DISABLED);if(Object.hasOwn(data,'proposal')||Object.hasOwn(data,'contracts_for'))AUTO_DEMO.safeRead(data);}
 function requestNow(data,timeout=16000,accept=null,abortSignal=null){return new Promise((resolve,reject)=>{
+ guardFinancialRequest(data);
  const socket=ws;
  if(abortSignal?.aborted)return reject(new Error('Solicitud cancelada'));
  if(!socket||socket.readyState!==WebSocket.OPEN)return reject(new Error('API desconectada'));
@@ -313,13 +316,14 @@ function requestNow(data,timeout=16000,accept=null,abortSignal=null){return new 
 function cleanPending(error){for(const p of [...pending.values()])p.finish(error);}
 function disconnect(socket,reason){
  if(ws!==socket)return;
- ws=null;apiReady=false;symbols=[];invalidateClock();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
+ ws=null;apiReady=false;symbols=[];invalidateClock();if(typeof AUTO_DEMO_UI!=='undefined')AUTO_DEMO_UI.connectionLost();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
  socket.onopen=socket.onclose=socket.onerror=socket.onmessage=null;
  try{socket.close();}catch{}
  cancelScan=true;cleanPending(new Error(reason));
  state('Desconectada');$('detail').textContent=reason;updateConnectionUI();log(reason);scheduleReconnect();
 }
 function connect(isRetry=false){
+ if(typeof AUTO_DEMO_UI!=='undefined'&&ws)AUTO_DEMO_UI.connectionLost();
  if(typeof MARKET_SESSION!=='undefined'&&!MARKET_SESSION.owner){void MARKET_SESSION.command({type:'click',id:'connect'}).catch(e=>log(e.message));return;}
  stopReconnect();stopHeartbeat();stopConnectionTimer();clearWatchTimer();
  apiReady=false;symbols=[];invalidateClock();cancelScan=true;
@@ -358,7 +362,7 @@ function connect(isRetry=false){
   if(!p){if(msg.subscription?.id)forgetSubscription(socket,msg.subscription.id);return;}
   if(p.socket!==socket)return;
   if(msg.subscription?.id)p.subscriptionId=msg.subscription.id;
-  if(msg.error){p.finish(new Error(msg.error.message||msg.error.code||'Error API'));return;}
+  if(msg.error){p.finish(Object.assign(new Error(msg.error.message||msg.error.code||'Error API'),{apiCode:msg.error.code||'API_ERROR'}));return;}
   try{if(!p.accept||p.accept(msg))p.finish(null,msg);}catch(error){p.finish(error);}
  };
  socket.onerror=()=>disconnect(socket,'Error en conexión WebSocket');

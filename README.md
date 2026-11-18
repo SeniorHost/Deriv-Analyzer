@@ -1,6 +1,12 @@
-# Deriv Analyzer v2.0 — escáner inteligente multiactivo
+# Deriv Analyzer AUTO DEMO v2.1 — radar y simulación controlada
 
-Candidata experimental en `feature/scanner-25-fast-navigation`, basada en `feature/intelligent-market-scanner` (`166dd52`). No ejecuta operaciones y no existe ventaja financiera demostrada.
+Candidata experimental en `feature/auto-demo-controlled`, basada en `feature/scanner-25-fast-navigation` (`abdfe29`). No ejecuta operaciones y no existe ventaja financiera demostrada.
+
+La vista completa añade **DERIV AUTO DEMO — MONITOR**, un libro de simulación optativo e independiente. Parte APAGADO; solo inicia con confirmación explícita de saldo/límites virtuales. Defaults 9.989 / 9.900 / 10.500 USD, inversión fija máxima 2 USD y una posición de cinco minutos. Consume las señales del radar, cotiza propuestas públicas frescas y observa ticks; reserva exposición, detiene entradas al alcanzar límites y no reanuda tras cortes/reinicio. El informe ZIP contiene nueve archivos y un HTML autónomo.
+
+**Las compras y la autenticación están bloqueadas. No se conecta ninguna cuenta DEMO ni real.** El saldo virtual no es el saldo confirmado de una cuenta; se informa como no disponible. La documentación de autenticación devolvió Forbidden; se entrega la alternativa de simulación segura, con requisitos futuros documentados. Los pagos de propuestas no prueban ejecución ni rentabilidad.
+
+Consulta [uso del monitor](AUTO_DEMO_MONITOR.md), [seguridad y límites](AUTO_DEMO_SECURITY.md) y [formatos del informe](EXPORTS.md). Los registros anteriores siguen en sus claves/CSV, separados del nuevo módulo.
 
 - **Mejores señales disponibles**: hasta 25 tarjetas dinámicas con tendencia, RISE/FALL/SIN CONFIRMACIÓN, método versionado, explicación, vigencia, antigüedad y evidencia. Cada análisis se publica antes de esperar el seguimiento prospectivo o terminar la tanda. Una señal nueva reemplaza primero una tarjeta amarilla; las confirmadas conservan su posición mientras sean válidas; una vela caducada no se reactiva.
 - **Colores del radar**: tarjeta verde RISE vigente, roja FALL vigente, amarilla sin confirmación, gris pendiente/caducada/antigua/error. Se actualizan nodos por símbolo sin reconstruir la cuadrícula ni consultar la API para pintar.
