@@ -1,0 +1,12 @@
+'use strict';
+const BACKGROUND_TASKS=(()=>{
+ const lanes=new Map();let sequence=0,closed=false;
+ function lane(name){if(!lanes.has(name))lanes.set(name,{worker:null,queue:[],current:null});return lanes.get(name);}
+ function finish(l,error,value){const job=l.current;if(!job)return;l.current=null;clearTimeout(job.timer);job.signal?.removeEventListener('abort',job.abort);error?job.reject(error):job.resolve(value);pump(l);}
+ function pump(l){if(closed||l.current||!l.queue.length)return;if(!l.worker){try{const worker=l.worker=new Worker('analysis-worker.js');worker.onmessage=e=>{if(l.worker===worker&&l.current?.id===e.data.id)finish(l,e.data.error?new Error(e.data.error):null,e.data.value);};worker.onerror=()=>{if(l.worker!==worker)return;worker.terminate();l.worker=null;finish(l,new Error('Trabajador de cálculo no disponible'));};}catch{for(const job of l.queue.splice(0))job.reject(new Error('Trabajador de cálculo no disponible'));return;}}
+  const job=l.queue.shift();l.current=job;job.timer=setTimeout(()=>{l.worker.terminate();l.worker=null;finish(l,new Error('Cálculo agotado; sin bloquear la vista'));},60000);try{l.worker.postMessage({id:job.id,task:job.task,payload:job.payload});}catch{finish(l,new Error('No se pudo enviar el cálculo'));}
+ }
+ function run(task,payload,{signal,priority=0,lane:which=['validate','report'].includes(task)?'state':'analysis'}={}){if(closed||signal?.aborted)return Promise.reject(new Error('Cálculo cancelado'));const l=lane(which);return new Promise((resolve,reject)=>{const job={id:++sequence,task,payload,signal,priority,resolve,reject,timer:null};job.abort=()=>{const index=l.queue.indexOf(job);if(index>=0){l.queue.splice(index,1);reject(new Error('Cálculo cancelado'));}else if(l.current===job){job.reject(new Error('Cálculo cancelado'));job.resolve=job.reject=()=>{};}};signal?.addEventListener('abort',job.abort,{once:true});l.queue.push(job);l.queue.sort((a,b)=>b.priority-a.priority||a.id-b.id);pump(l);});}
+ function close(){closed=true;for(const l of lanes.values()){l.worker?.terminate();for(const j of [l.current,...l.queue].filter(Boolean)){clearTimeout(j.timer);j.signal?.removeEventListener('abort',j.abort);j.reject(new Error('Vista cerrada'));}l.current=null;l.queue=[];}}
+ window.addEventListener('beforeunload',close);return {run,close};
+})();

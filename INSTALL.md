@@ -1,6 +1,6 @@
 # Instalación y revisión de la candidata v2.1
 
-Rama: `feature/auto-demo-controlled`, base `feature/scanner-25-fast-navigation` (`abdfe29`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
+Rama: `fix/auto-demo-responsive`, base `feature/auto-demo-controlled` (`b738100`). Chrome 116 o posterior, Manifest V3. No requiere Node para usar la extensión, credenciales de Deriv ni clave API.
 
 1. Descarga o cambia a la rama candidata en una carpeta local de revisión.
 2. En `chrome://extensions`, activa el modo de desarrollador y carga esa carpeta como extensión descomprimida. Si ya usas esa misma carpeta e ID, pulsa **Recargar** para conservar su almacenamiento. Copiar a otra carpeta puede generar otro ID y otro almacenamiento; exporta primero los CSV. No desinstales la extensión anterior para actualizarla.
@@ -24,6 +24,8 @@ node --test tests/*.test.cjs
 node tests/browser-smoke.cjs
 node tests/radar-browser.cjs
 node tests/auto-demo-browser.cjs
+node tests/start-stop-browser.cjs
+node tests/simulation-soak.cjs
 node tests/live-market-smoke.cjs
 node tests/live-auto-demo.cjs
 ```
@@ -31,3 +33,5 @@ node tests/live-auto-demo.cjs
 Node 20 o posterior. La suite unitaria es offline y no instala dependencias. La prueba DOM requiere Playwright y Chromium (`CHROMIUM_PATH` permite elegir el ejecutable). La prueba pública opcional requiere Python y `websockets`, acceso al endpoint oficial y no usa autenticación ni opera. GitHub Actions ejecuta sintaxis, espacios y la suite unitaria en Node 20; no presupone acceso a Deriv.
 
 El Chromium administrado de este entorno bloquea extensiones descomprimidas por política. Se probó el DOM real con APIs Chrome/Deriv simuladas y la API pública por separado. Queda pendiente cargar esta candidata en Chrome autorizado y comprobar panel lateral, ventana, persistencia entre reinicios y sesiones prolongadas. No se modificaron políticas del navegador.
+
+La prueba prolongada usa 150 segundos de reloj real por defecto, 95 activos y API simulada. `SOAK_MS` permite repetirla con otra duración. Los trabajadores de cálculo son archivos locales y no requieren permisos nuevos ni conexiones adicionales. Si se bloquean por política, aparece un error y las entradas permanecen deshabilitadas.

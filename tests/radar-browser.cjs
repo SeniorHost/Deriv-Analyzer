@@ -26,6 +26,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=r
   // Deterministic signal fixtures isolate scheduling/rendering from the already-tested rule engine.
   await page.evaluate(()=>{
    const analyze=MARKET_STRATEGIES.analyze;MARKET_STRATEGIES.analyze=(item,c,now,sequence)=>{if(!ADAPTIVE.valid(c,now))throw new Error('Invalid/open candles in pipeline');const r=analyze(item,c,now,sequence);const directions={R_10:'SUBE',R_25:'BAJA',frxTEST15:'BAJA',frxTEST16:'SUBE'};return {...r,direction:directions[item.symbol]||'ESPERAR',method:'browser-fixture',version:'test',reason:'Controlled scheduling fixture'};};
+   const run=BACKGROUND_TASKS.run;BACKGROUND_TASKS.run=async(task,payload,options)=>{const result=await run(task,payload,options);if(task==='scan'){const directions={R_10:'SUBE',R_25:'BAJA',frxTEST15:'BAJA',frxTEST16:'SUBE'};result.reading={...result.reading,direction:directions[payload.item.symbol]||'ESPERAR',method:'browser-fixture',version:'test',reason:'Controlled scheduling fixture'};}return result;};
    globalThis.__entryWaiters=[];registerForwardItem=async row=>{if(['R_10','R_25'].includes(row.symbol))await new Promise(resolve=>__entryWaiters.push(resolve));};
   });
   await page.click('#connect');
