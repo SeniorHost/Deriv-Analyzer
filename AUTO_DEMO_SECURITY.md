@@ -1,4 +1,4 @@
-# Seguridad de AUTO DEMO v2.1
+# Seguridad de AUTO DEMO v2.2
 
 ## Alcance entregado
 
@@ -27,7 +27,7 @@ Las propuestas deben coincidir con activo, CALL/PUT, USD, inversión fija, cinco
 
 Instalación: APAGADO. Solo una acción explícita y confirmación del saldo/límites virtuales inicia SIMULACIÓN. PREPARADO y ACTIVO DEMO son estados reservados, sin ruta de activación. DETENIENDO bloquea inmediatamente entradas pero mantiene vigilancia; DETENIDO y ERROR nunca reanudan automáticamente.
 
-Defaults: inicial 9.989 USD, inferior 9.900, superior 10.500; inversión fija y exposición máxima 2 USD, una posición, duración 300 s. Los límites solo se cambian sin sesión activa ni exposición pendiente; cada cambio conserva configuración anterior/nueva y cada sesión guarda una copia. No hay martingala ni aumentos por pérdida.
+Defaults: inicial 9.989 USD, inferior 9.900, superior 10.500; inversión fija máxima 2 USD, exposición máxima inicial 12 USD, hasta seis posiciones, duración 300 s. Los límites solo se cambian sin sesión activa ni exposición pendiente; cada cambio conserva configuración anterior/nueva y cada sesión guarda una copia. No hay martingala ni aumentos por pérdida.
 
 El libro conserva saldo realizado virtual sin descontar dos veces la inversión: reserva la inversión mientras está pendiente y calcula disponible = saldo − exposición. Solo permite una entrada si la pérdida máxima deja saldo ≥ límite inferior. Cuando disponible alcanza el límite, lo atraviesa una posible entrada o se alcanza el objetivo, detiene nuevas entradas. Esto no garantiza acabar exactamente en un límite. No cierra contratos oficiales, porque no existen.
 
@@ -58,3 +58,5 @@ La detención aplica primero un bloqueo en memoria/generación de sesión, cance
 Cálculos del escáner/retrospectivos y validación/exportación usan dos trabajadores empaquetados de cómputo, solo en la vista propietaria. No tienen sockets ni almacenamiento. Las mismas funciones de indicadores y estrategias permanecen intactas y se contrastan con resultados directos. No son motores de operaciones ni conexiones adicionales. Si el trabajador no responde, se falla cerrado; no se vuelve a bloquear la interfaz calculando sincrónicamente.
 
 La persistencia agrupa revisiones en un único escritor: no copia ni revalida todo el historial por cada señal duplicada. Cada espera se resuelve solo tras guardar su revisión, con plazo de diez segundos; un éxito tardío después de ese plazo no vuelve a habilitar el motor. No se elimina ningún registro para reducir carga. Un cierre forzado antes de que Chrome confirme un guardado puede perder datos todavía en memoria: la fecha y revisión guardadas se muestran separadas de la actividad de la vista.
+
+El motor v2.2 reserva plazas y exposición antes de consultas pendientes. Un timeout individual no detiene las otras posiciones: clasifica la fase y conserva exposición incompleta si ya hubo entrada. Pérdidas globales de conexión/reloj o persistencia bloquean entradas nuevas. Ver [arquitectura, límites y diagnóstico](MULTI_MONITOR.md).

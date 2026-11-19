@@ -1,8 +1,10 @@
-# Deriv Analyzer AUTO DEMO v2.1 — radar y simulación controlada
+# Deriv Analyzer v2.2 — simulación multioperación y diagnóstico
 
-Corrección candidata en `fix/auto-demo-responsive`, basada en `feature/auto-demo-controlled` (`b738100`). No ejecuta operaciones y no existe ventaja financiera demostrada.
+Candidata en `feature/auto-demo-multi-monitor`, basada en `fix/auto-demo-responsive` (`2a6381e`). No ejecuta operaciones y no existe ventaja financiera demostrada.
 
-La vista completa añade **DERIV AUTO DEMO — MONITOR**, un libro de simulación optativo e independiente. Parte APAGADO; solo inicia con confirmación explícita de saldo/límites virtuales. Defaults 9.989 / 9.900 / 10.500 USD, inversión fija máxima 2 USD y una posición de cinco minutos. Consume las señales del radar, cotiza propuestas públicas frescas y observa ticks; reserva exposición, detiene entradas al alcanzar límites y no reanuda tras cortes/reinicio. El informe ZIP contiene nueve archivos y un HTML autónomo.
+La vista completa añade **DERIV AUTO DEMO — MONITOR**, un libro de simulación optativo e independiente. Parte APAGADO; solo inicia con confirmación explícita de saldo/límites virtuales. Defaults 9.989 / 9.900 / 10.500 USD, inversión fija máxima 2 USD, seis posiciones de cinco minutos y exposición máxima inicial 12 USD. Consume las señales del radar, cotiza propuestas públicas frescas y observa ticks; reserva exposición, detiene entradas al alcanzar límites y no reanuda tras cortes/reinicio. El informe ZIP conserva los nueve archivos anteriores y añade siete, incluido diagnóstico y evaluación prospectiva; contiene un HTML autónomo.
+
+La sección **SALUD DEL SISTEMA** conserva incidencias, detecta pausas y permite descargar un diagnóstico incluso con el motor detenido. El panel muestra hasta seis posiciones y los candidatos rechazados por capacidad. La evaluación prospectiva usa pagos observados, Wilson y agrupaciones descriptivas; la sombra es optativa y solo utiliza los ticks ya disponibles de activos admitidos. No influye en la selección activa. Consulta [uso y arquitectura v2.2](MULTI_MONITOR.md).
 
 La corrección de respuesta distingue INICIANDO/SIMULANDO/DETENIENDO/DETENIDO/ERROR. Detener está fijo y disponible desde el inicio, no espera a persistencia y bloquea continuaciones anteriores. Cómputos y validaciones pesados se ejecutan fuera del hilo de interfaz; un único escritor agrupa registros sin borrarlos. La actividad muestra fechas de lectura y guardado, sin una barra financiera que aparente trabajo. Una restauración conserva registros y deja la simulación detenida.
 
